@@ -18,7 +18,9 @@ def load_dotenv(path: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if not os.environ.get(key):
+            os.environ[key] = value
 
 
 @dataclass(frozen=True)
@@ -54,9 +56,10 @@ def get_settings() -> Settings:
         or os.environ.get("OPENAI_API_KEY")
         or "",
         llm_model=os.environ.get("DEVMIND_LLM_MODEL")
+        or os.environ.get("OPENAI_MODEL")
         or os.environ.get("OPENROUTER_MODEL")
         or os.environ.get("GROQ_MODEL")
-        or "",
+        or ("gpt-4o-mini" if _llm_base_url() else ""),
         github_token=os.environ.get("GITHUB_TOKEN", ""),
         cache_dir=os.environ.get("DEVMIND_CACHE_DIR", str(REPO_ROOT / ".cache")),
         host=os.environ.get("DEVMIND_HOST", "127.0.0.1"),
@@ -65,11 +68,17 @@ def get_settings() -> Settings:
 
 
 def _llm_base_url() -> str:
-    explicit = os.environ.get("DEVMIND_LLM_BASE_URL", "").rstrip("/")
+    explicit = (
+        os.environ.get("DEVMIND_LLM_BASE_URL")
+        or os.environ.get("OPENAI_BASE_URL")
+        or ""
+    ).rstrip("/")
     if explicit:
         return explicit
     if os.environ.get("OPENROUTER_API_KEY"):
         return "https://openrouter.ai/api/v1"
     if os.environ.get("GROQ_API_KEY"):
         return "https://api.groq.com/openai/v1"
+    if os.environ.get("OPENAI_API_KEY"):
+        return "https://api.openai.com/v1"
     return ""

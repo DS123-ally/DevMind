@@ -102,7 +102,7 @@ def health(request: Request) -> dict:
     return {
         "status": "ok" if connected else "degraded",
         "neo4j": "connected" if connected else "unavailable",
-        "llm": "configured" if settings.llm_enabled else "off",
+        "llm": settings.llm_model if settings.llm_enabled else "off",
         "github": "configured" if settings.github_token else "public-only",
         "error": request.app.state.neo4j_error,
     }
