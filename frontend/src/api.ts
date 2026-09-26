@@ -103,10 +103,21 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const detail = typeof body.detail === "string" ? body.detail : "Request failed";
-    throw new Error(detail);
+    throw new Error(_detail(body, response.statusText));
   }
   return body as T;
+}
+
+function _detail(body: { detail?: unknown }, fallback: string): string {
+  const detail = body.detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => (typeof item === "object" && item && "msg" in item ? String((item as { msg: string }).msg) : JSON.stringify(item)))
+      .filter(Boolean);
+    if (parts.length) return parts.join("; ");
+  }
+  return fallback || "Request failed";
 }
 
 export const api = {

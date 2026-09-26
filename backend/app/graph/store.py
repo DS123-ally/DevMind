@@ -172,12 +172,13 @@ class GraphStore:
         OPTIONAL MATCH (d)-[:DECIDED_BY]->(dev:Developer)
         OPTIONAL MATCH (d)-[:SUPERSEDES]->(old:Decision)
         OPTIONAL MATCH (d)-[:ABOUT]->(n)
-        RETURN properties(d) AS decision,
-               collect(DISTINCT dev.name) AS deciders,
-               collect(DISTINCT old.title) AS supersedes,
-               collect(DISTINCT coalesce(n.qualifiedName, n.path, n.title, n.name)) AS about
+        WITH d,
+             collect(DISTINCT dev.name) AS deciders,
+             collect(DISTINCT old.title) AS supersedes,
+             collect(DISTINCT coalesce(n.qualifiedName, n.path, n.title, n.name)) AS about
         ORDER BY d.status, d.date
         LIMIT 8
+        RETURN properties(d) AS decision, deciders, supersedes, about
         """
         file_query = """
         MATCH (f:File {repoId: $repoId})

@@ -8,6 +8,8 @@ from pathlib import Path
 from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
+from neo4j.exceptions import Neo4jError
+
 from app.config import REPO_ROOT, get_settings
 from app.graph.crud import LABELS, RELS
 from app.graph.store import QUERIES, SCHEMA
@@ -270,6 +272,8 @@ def project_ask(project_id: str, body: AskIn, request: Request) -> dict:
         return ask(_store(request), request.app.state.settings, project_id, body.question.strip(), body.mode)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Neo4jError as exc:
+        raise HTTPException(status_code=500, detail=str(exc.message) if getattr(exc, "message", None) else str(exc)) from exc
 
 
 @router.post("/projects/{project_id}/decisions")

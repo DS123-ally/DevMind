@@ -22,7 +22,7 @@ type Graph = { nodes: { id: string; labels: string[]; name: string }[]; edges: {
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : "Request failed");
+  if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : response.statusText || "Request failed");
   return body as T;
 }
 
