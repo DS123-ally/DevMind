@@ -8,6 +8,8 @@ from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from app.config import REPO_ROOT
+from app.graph.crud import LABELS, RELS
+from app.graph.store import QUERIES, SCHEMA
 from app.ingest.github import GitHubError, clone_or_update, parse_github_url
 from app.ingest.pipeline import IngestLimitError, scan
 from app.reasoning.agent import ask, read_source
@@ -45,6 +47,16 @@ class IssueIn(BaseModel):
     status: str = "open"
     aboutIds: list[str] = Field(default_factory=list)
     resolution: str | None = None
+
+
+class NodePatch(BaseModel):
+    props: dict = Field(default_factory=dict)
+
+
+ALLOWED_NODE_PROPS = {
+    "title", "rationale", "status", "description", "summary", "name",
+    "key", "message", "headline", "question", "source",
+}
 
 
 def _store(request: Request):
@@ -251,6 +263,51 @@ def project_decision(project_id: str, body: DecisionIn, request: Request) -> dic
         raise HTTPException(status_code=404, detail="Project not found.") from exc
 
 
+@router.get("/schema")
+def graph_schema() -> dict:
+    return {
+        "labels": sorted(LABELS),
+        "relationships": sorted(RELS),
+        "constraints": len(SCHEMA),
+        "queries": sorted(QUERIES),
+    }
+
+
+@router.get("/projects/{project_id}/nodes/{node_id}")
+def get_node(project_id: str, node_id: str, request: Request) -> dict:
+    found = _store(request).crud.read(node_id, project_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Node not found.")
+    return found
+
+
+@router.patch("/projects/{project_id}/nodes/{node_id}")
+def patch_node(project_id: str, node_id: str, body: NodePatch, request: Request) -> dict:
+    props = {key: value for key, value in body.props.items() if key in ALLOWED_NODE_PROPS}
+    if not props:
+        raise HTTPException(status_code=400, detail="No updatable properties supplied.")
+    try:
+        return _store(request).crud.update(node_id, props, project_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Node not found.") from exc
+
+
+@router.delete("/projects/{project_id}/nodes/{node_id}")
+def delete_node(project_id: str, node_id: str, request: Request) -> dict:
+    removed = _store(request).crud.delete(node_id, project_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Node not found.")
+    return {"deleted": node_id}
+
+
+@router.post("/projects/{project_id}/seed")
+def seed_project(project_id: str, request: Request) -> dict:
+    store = _store(request)
+    if store.get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    return store.seed_graph(project_id)
+
+
 @router.post("/projects/{project_id}/issues")
 def project_issue(project_id: str, body: IssueIn, request: Request) -> dict:
     try:
@@ -276,3 +333,4 @@ def create_app(lifespan=None) -> FastAPI:
     )
     application.include_router(router)
     return application
+
