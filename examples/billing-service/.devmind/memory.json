@@ -5,6 +5,7 @@
       "title": "Stripe webhook retries double-apply payments",
       "status": "resolved",
       "description": "invoice.paid deliveries are at-least-once. apply_payment inserted a second payment and raised IntegrityError.",
+      "caused": ["duplicate-payment"],
       "affects": ["app/webhooks.py", "apply_payment"]
     }
   ],
@@ -30,7 +31,8 @@
       "status": "merged",
       "author": "Lena Ortiz",
       "authorEmail": "lena@example.com",
-      "changes": ["app/webhooks.py", "app/store.py"]
+      "changes": ["app/webhooks.py", "app/store.py"],
+      "closes": ["BILL-14"]
     }
   ]
 }

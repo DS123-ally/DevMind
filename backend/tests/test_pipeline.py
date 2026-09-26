@@ -37,9 +37,11 @@ def test_billing_service_graph_document():
     issue = document.issues[0]
     assert issue.key == "BILL-14"
     assert apply_payment.id in issue.about_ids
+    assert document.errors[0].id in issue.caused_error_ids
     solution = document.solutions[0]
     assert issue.id in solution.resolves_issue_ids
     assert document.errors[0].id in solution.resolves_error_ids
+    assert issue.id in document.pull_requests[0].closes_issue_ids
 
     names = {item.name for item in document.technologies}
     assert "stripe" in names

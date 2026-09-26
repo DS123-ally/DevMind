@@ -29,6 +29,10 @@ export type Briefing = {
   evidence: Evidence[];
   voice: string;
   createdAt: string;
+  intent?: string;
+  steps?: { id: string; label: string; detail: string }[];
+  path?: { kind: string; name: string; relationship: string; note?: string }[];
+  citations?: { kind: string; name: string; path: string; line?: number | null }[];
 };
 
 export type ProjectDetail = {
@@ -37,10 +41,16 @@ export type ProjectDetail = {
   path: string;
   summary?: string;
   updatedAt?: string;
+  githubUrl?: string;
   technologies: { name: string; category: string }[];
   decisions: { id: string; title: string; status: string; date?: string }[];
   inventory: Inventory;
   briefings: Briefing[];
+  memory?: {
+    decisions: { id: string; title: string; status: string; rationale: string; technologies: string[]; solutions: string[] }[];
+    issues: { id: string; key: string; title: string; status: string; errors: string[]; solutions: string[]; pulls: number[] }[];
+    conversations: { id: string; question: string; headline: string; mode: string; createdAt: string }[];
+  };
 };
 
 export type ProjectSummary = {
@@ -93,6 +103,13 @@ export const api = {
     request<IngestReport>("/api/ingest", { method: "POST", body: JSON.stringify({ path, name }) }),
   demoBilling: () => request<IngestReport>("/api/demo/billing", { method: "POST" }),
   demoSelf: () => request<IngestReport>("/api/demo/self", { method: "POST" }),
+  github: (url: string, name?: string) =>
+    request<IngestReport>("/api/ingest/github", { method: "POST", body: JSON.stringify({ url, name }) }),
+  graph: (id: string) => request<{ nodes: { id: string; labels: string[]; name: string }[]; edges: { source: string; target: string; type: string }[] }>(`/api/projects/${id}/graph`),
+  file: (id: string, path: string) =>
+    request<{ content: string; file: { path: string; language: string }; symbols: { name: string; kind: string; line: number }[] }>(
+      `/api/projects/${id}/files?path=${encodeURIComponent(path)}`,
+    ),
   ask: (id: string, question: string, mode: string) =>
     request<Briefing>(`/api/projects/${id}/ask`, {
       method: "POST",

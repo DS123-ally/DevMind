@@ -73,7 +73,12 @@ class IngestLimitError(ValueError):
     """Raised when a path is too large to ingest safely."""
 
 
-def scan(root: Path, name: str | None = None) -> IngestDocument:
+def scan(
+    root: Path,
+    name: str | None = None,
+    github_url: str | None = None,
+    github_token: str = "",
+) -> IngestDocument:
     root = root.resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"{root} is not a directory")
@@ -163,10 +168,25 @@ def scan(root: Path, name: str | None = None) -> IngestDocument:
     _collect_developers(doc, root, developers)
     _collect_adrs(doc, paths, root, files_by_path, symbols_by_name, developers)
     _collect_memory(doc, root, files_by_path, symbols_by_name, developers)
+    if github_url:
+        from app.ingest.github import fetch_github_memory
+
+        try:
+            fetch_github_memory(github_url, github_token, doc, files_by_path, symbols_by_name, developers)
+        except Exception as exc:
+            doc.warnings.append(f"GitHub metadata was not imported ({exc}).")
     _link_supersedes(doc)
+    _link_decision_technologies(doc)
     readme = root / "README.md"
-    if readme.is_file():
+    if readme.is_file() and not doc.summary:
         doc.summary = readme_summary(readme.read_text(encoding="utf-8", errors="replace"))
+    elif readme.is_file() and not github_url:
+        doc.summary = readme_summary(readme.read_text(encoding="utf-8", errors="replace")) or doc.summary
+    counts: dict[str, int] = {}
+    for file in doc.files:
+        if file.language and file.language != "text":
+            counts[file.language] = counts.get(file.language, 0) + 1
+    doc.languages = counts
     doc.developers = list(developers.values())
     return doc
 
@@ -402,6 +422,8 @@ def _collect_memory(
     doc.warnings.extend(bundle.warnings)
     issue_ids: dict[str, str] = {}
     error_ids: dict[str, str] = {}
+    pending_causes: list[tuple[str, list[str]]] = []
+    solution_ids: dict[str, str] = {}
 
     for item in bundle.issues:
         key = str(item.get("key") or item.get("title") or "").strip()
@@ -420,8 +442,10 @@ def _collect_memory(
                 description=str(item.get("description") or ""),
                 source="memory",
                 about_ids=resolve_targets(_string_list(item.get("affects")), files_by_path, symbols_by_name),
+                caused_error_ids=[],
             )
         )
+        pending_causes.append((issue_id, _string_list(item.get("caused") or item.get("errors"))))
 
     for item in bundle.errors:
         key = str(item.get("key") or item.get("message") or "").strip()
@@ -442,6 +466,13 @@ def _collect_memory(
             )
         )
 
+    for issue_id, keys in pending_causes:
+        for issue in doc.issues:
+            if issue.id != issue_id:
+                continue
+            issue.caused_error_ids = [error_ids[key] for key in keys if key in error_ids]
+            break
+
     for item in bundle.solutions:
         key = str(item.get("key") or item.get("summary") or "").strip()
         summary = str(item.get("summary") or "").strip()
@@ -449,9 +480,11 @@ def _collect_memory(
             doc.warnings.append("Skipped a solution missing key or summary.")
             continue
         resolves = [str(part) for part in _string_list(item.get("resolves"))]
+        solution_id = node_id(doc.repo_id, "solution", key)
+        solution_ids[key] = solution_id
         doc.solutions.append(
             SolutionRec(
-                id=node_id(doc.repo_id, "solution", key),
+                id=solution_id,
                 key=key,
                 summary=summary,
                 source="memory",
@@ -481,6 +514,7 @@ def _collect_memory(
                 url=str(item.get("url") or "") or None,
                 author_id=author_id,
                 file_ids=resolve_targets(_string_list(item.get("changes")), files_by_path, symbols_by_name),
+                closes_issue_ids=[issue_ids[part] for part in _string_list(item.get("closes")) if part in issue_ids],
             )
         )
 
@@ -503,6 +537,7 @@ def _collect_memory(
                 date=str(item.get("date") or "") or None,
                 decider_ids=[_developer_by_name(developers, doc.repo_id, name) for name in names],
                 about_ids=resolve_targets(_string_list(item.get("affects")), files_by_path, symbols_by_name),
+                informed_by_ids=[solution_ids[part] for part in _string_list(item.get("informedBy")) if part in solution_ids],
                 supersedes_slug=str(item.get("supersedes") or "") or None,
             )
         )
@@ -522,6 +557,30 @@ def _link_supersedes(doc: IngestDocument) -> None:
                     match = candidate
                     break
         decision.supersedes_slug = match.slug if match and match.id != decision.id else None
+
+
+def _link_decision_technologies(doc: IngestDocument) -> None:
+    techs = {item.name.lower(): item.id for item in doc.technologies}
+    for decision in doc.decisions:
+        blob = " ".join(
+            part for part in [decision.title, decision.rationale, decision.context or "", decision.path or ""] if part
+        ).lower()
+        for name, tech_id in techs.items():
+            if len(name) >= 3 and name in blob and tech_id not in decision.technology_ids:
+                decision.technology_ids.append(tech_id)
+    issue_to_solutions: dict[str, list[str]] = {}
+    for solution in doc.solutions:
+        for issue_id in solution.resolves_issue_ids:
+            issue_to_solutions.setdefault(issue_id, []).append(solution.id)
+    issues = {item.id: item for item in doc.issues}
+    for decision in doc.decisions:
+        if decision.informed_by_ids:
+            continue
+        about = set(decision.about_ids)
+        for issue in issues.values():
+            if about & set(issue.about_ids):
+                decision.informed_by_ids.extend(issue_to_solutions.get(issue.id, []))
+
 
 
 def _developer(developers: dict[str, DeveloperRec], repo_id: str, name: str, email: str | None) -> str:

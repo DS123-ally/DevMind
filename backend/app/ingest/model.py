@@ -65,6 +65,8 @@ class DecisionRec:
     path: str | None = None
     decider_ids: list[str] = field(default_factory=list)
     about_ids: list[str] = field(default_factory=list)
+    technology_ids: list[str] = field(default_factory=list)
+    informed_by_ids: list[str] = field(default_factory=list)
     supersedes_slug: str | None = None
 
 
@@ -77,6 +79,8 @@ class IssueRec:
     description: str
     source: str
     about_ids: list[str] = field(default_factory=list)
+    caused_error_ids: list[str] = field(default_factory=list)
+    url: str | None = None
 
 
 @dataclass
@@ -109,6 +113,8 @@ class PullRequestRec:
     url: str | None = None
     author_id: str | None = None
     file_ids: list[str] = field(default_factory=list)
+    closes_issue_ids: list[str] = field(default_factory=list)
+    body: str = ""
 
 
 @dataclass
@@ -139,3 +145,6 @@ class IngestDocument:
     authored: list[tuple[str, str, int]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     memory_loaded: bool = False
+    github_url: str | None = None
+    default_branch: str | None = None
+    languages: dict[str, int] = field(default_factory=dict)

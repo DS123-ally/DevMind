@@ -1,21 +1,27 @@
-"""HTTP API. Briefings are written from the graph and then stored back into it."""
+"""HTTP API. Briefings are walks on the Neo4j graph, then stored back into it."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from app.config import REPO_ROOT
+from app.ingest.github import GitHubError, clone_or_update, parse_github_url
 from app.ingest.pipeline import IngestLimitError, scan
-from app.reasoning.engine import ask
+from app.reasoning.agent import ask, read_source
 
 router = APIRouter(prefix="/api")
 
 
 class IngestIn(BaseModel):
     path: str = Field(min_length=1, max_length=1024)
+    name: str | None = Field(default=None, max_length=200)
+
+
+class GitHubIn(BaseModel):
+    url: str = Field(min_length=8, max_length=500)
     name: str | None = Field(default=None, max_length=200)
 
 
@@ -53,13 +59,16 @@ def _store(request: Request):
             request.app.state.neo4j_error = None
         except Exception as exc:
             request.app.state.neo4j_error = str(exc)
-            raise HTTPException(status_code=503, detail="Neo4j is not connected. Start it with docker compose up -d.") from exc
+            raise HTTPException(
+                status_code=503,
+                detail="Neo4j is not connected. Check NEO4J_URI in .env or run docker compose up -d.",
+            ) from exc
     return store
 
 
-def _ingest(store, path: Path, name: str | None) -> dict:
+def _ingest(store, path: Path, name: str | None, github_url: str | None = None, github_token: str = "") -> dict:
     try:
-        document = scan(path, name)
+        document = scan(path, name, github_url=github_url, github_token=github_token)
     except IngestLimitError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -94,6 +103,7 @@ def health(request: Request) -> dict:
         "status": "ok" if connected else "degraded",
         "neo4j": "connected" if connected else "unavailable",
         "llm": "configured" if settings.llm_enabled else "off",
+        "github": "configured" if settings.github_token else "public-only",
         "error": request.app.state.neo4j_error,
     }
 
@@ -106,6 +116,52 @@ def projects(request: Request) -> dict:
 @router.post("/ingest")
 def ingest(body: IngestIn, request: Request) -> dict:
     return _ingest(_store(request), _resolve_path(body.path), body.name)
+
+
+@router.post("/ingest/github")
+def ingest_github(body: GitHubIn, request: Request) -> dict:
+    settings = request.app.state.settings
+    try:
+        parse_github_url(body.url)
+        root = clone_or_update(body.url, Path(settings.cache_dir), settings.github_token)
+    except GitHubError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    owner_repo = body.url.rstrip("/").split("github.com/")[-1].replace(".git", "")
+    name = body.name or owner_repo.replace("/", " / ")
+    return _ingest(
+        _store(request),
+        root,
+        name,
+        github_url=body.url,
+        github_token=settings.github_token,
+    )
+
+
+@router.post("/ingest/upload")
+async def ingest_upload(request: Request, archive: UploadFile = File(...)) -> dict:
+    import shutil
+    import zipfile
+    from tempfile import mkdtemp
+
+    if not archive.filename or not archive.filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Upload a .zip of the repository.")
+    workspace = Path(mkdtemp(prefix="devmind-upload-"))
+    zip_path = workspace / "repo.zip"
+    zip_path.write_bytes(await archive.read())
+    extract = workspace / "src"
+    extract.mkdir()
+    try:
+        with zipfile.ZipFile(zip_path) as zipped:
+            zipped.extractall(extract)
+    except zipfile.BadZipFile as exc:
+        shutil.rmtree(workspace, ignore_errors=True)
+        raise HTTPException(status_code=400, detail="The zip file could not be read.") from exc
+    children = [path for path in extract.iterdir() if path.name != "__MACOSX"]
+    root = children[0] if len(children) == 1 and children[0].is_dir() else extract
+    try:
+        return _ingest(_store(request), root, archive.filename[:-4])
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
 
 
 @router.post("/demo/billing")
@@ -131,10 +187,13 @@ def project(project_id: str, request: Request) -> dict:
         "path": repository.get("path"),
         "summary": repository.get("summary"),
         "updatedAt": repository.get("updatedAt"),
+        "githubUrl": repository.get("githubUrl"),
+        "languages": repository.get("languagesJson"),
         "technologies": found["technologies"],
         "decisions": found["decisions"],
         "inventory": store.inventory(project_id),
         "briefings": store.list_briefings(project_id),
+        "memory": store.memory_panel(project_id),
     }
 
 
@@ -144,6 +203,27 @@ def project_tree(project_id: str, request: Request) -> dict:
     if tree is None:
         raise HTTPException(status_code=404, detail="Project not found.")
     return tree
+
+
+@router.get("/projects/{project_id}/graph")
+def project_graph(project_id: str, request: Request) -> dict:
+    store = _store(request)
+    if store.get_project(project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    return store.subgraph(project_id)
+
+
+@router.get("/projects/{project_id}/files")
+def project_file(project_id: str, path: str, request: Request) -> dict:
+    store = _store(request)
+    record = store.file_record(project_id, path)
+    if record is None:
+        raise HTTPException(status_code=404, detail="File is not in the graph.")
+    try:
+        content = read_source(record["root"], path)
+    except (FileNotFoundError, PermissionError, OSError) as exc:
+        raise HTTPException(status_code=404, detail=f"Could not read {path} from disk.") from exc
+    return {"file": record["file"], "symbols": record["symbols"], "content": content}
 
 
 @router.post("/projects/{project_id}/ask")
@@ -190,7 +270,7 @@ def project_issue(project_id: str, body: IssueIn, request: Request) -> dict:
 def create_app(lifespan=None) -> FastAPI:
     application = FastAPI(
         title="DevMind",
-        version="0.1.0",
+        version="0.2.0",
         summary="Project memory for code: what it does, and why it works this way.",
         lifespan=lifespan,
     )

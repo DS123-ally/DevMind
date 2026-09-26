@@ -30,6 +30,8 @@ class Settings:
     llm_base_url: str
     llm_api_key: str
     llm_model: str
+    github_token: str
+    cache_dir: str
     host: str
     port: int
 
@@ -45,9 +47,29 @@ def get_settings() -> Settings:
         neo4j_user=os.environ.get("NEO4J_USERNAME") or os.environ.get("NEO4J_USER", "neo4j"),
         neo4j_password=os.environ.get("NEO4J_PASSWORD", "devmindlocal"),
         neo4j_database=os.environ.get("NEO4J_DATABASE", "neo4j"),
-        llm_base_url=os.environ.get("DEVMIND_LLM_BASE_URL", "").rstrip("/"),
-        llm_api_key=os.environ.get("DEVMIND_LLM_API_KEY", ""),
-        llm_model=os.environ.get("DEVMIND_LLM_MODEL", ""),
+        llm_base_url=_llm_base_url(),
+        llm_api_key=os.environ.get("DEVMIND_LLM_API_KEY")
+        or os.environ.get("OPENROUTER_API_KEY")
+        or os.environ.get("GROQ_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+        or "",
+        llm_model=os.environ.get("DEVMIND_LLM_MODEL")
+        or os.environ.get("OPENROUTER_MODEL")
+        or os.environ.get("GROQ_MODEL")
+        or "",
+        github_token=os.environ.get("GITHUB_TOKEN", ""),
+        cache_dir=os.environ.get("DEVMIND_CACHE_DIR", str(REPO_ROOT / ".cache")),
         host=os.environ.get("DEVMIND_HOST", "127.0.0.1"),
         port=int(os.environ.get("DEVMIND_PORT", "8000")),
     )
+
+
+def _llm_base_url() -> str:
+    explicit = os.environ.get("DEVMIND_LLM_BASE_URL", "").rstrip("/")
+    if explicit:
+        return explicit
+    if os.environ.get("OPENROUTER_API_KEY"):
+        return "https://openrouter.ai/api/v1"
+    if os.environ.get("GROQ_API_KEY"):
+        return "https://api.groq.com/openai/v1"
+    return ""

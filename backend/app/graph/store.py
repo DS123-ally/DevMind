@@ -62,7 +62,7 @@ class GraphStore:
         MATCH (r:Repository)
         OPTIONAL MATCH (f:File {repoId: r.id})
         RETURN r.id AS id, r.name AS name, r.path AS path, r.summary AS summary,
-               r.updatedAt AS updatedAt, count(f) AS files
+               r.updatedAt AS updatedAt, r.githubUrl AS githubUrl, count(f) AS files
         ORDER BY r.updatedAt DESC
         """
         with self.driver.session(database=self.database) as session:
@@ -569,6 +569,128 @@ class GraphStore:
             )
         return briefings
 
+    def subgraph(self, repo_id: str, seed_ids: list[str] | None = None) -> dict:
+        query = """
+        MATCH (n {repoId: $repoId})
+        WHERE $seeds IS NULL OR size($seeds) = 0 OR n.id IN $seeds
+           OR n:Technology OR n:Decision OR n:Issue OR n:Solution OR n:PullRequest OR n:Error
+        WITH n LIMIT 90
+        OPTIONAL MATCH (n)-[r]->(m {repoId: $repoId})
+        RETURN collect(DISTINCT {id: n.id, labels: labels(n), name: coalesce(n.name, n.title, n.key, n.path, n.qualifiedName, '')}) AS nodes,
+               collect(DISTINCT CASE WHEN m IS NULL THEN null ELSE {source: n.id, target: m.id, type: type(r)} END) AS edges
+        """
+        with self.driver.session(database=self.database) as session:
+            record = session.run(query, repoId=repo_id, seeds=seed_ids or []).single()
+        nodes = [item for item in (record["nodes"] if record else []) if item and item.get("id")]
+        edges = [item for item in (record["edges"] if record else []) if item and item.get("source")]
+        return {"nodes": nodes[:80], "edges": edges[:140]}
+
+    def why_path(self, repo_id: str, tokens: list[str]) -> list[dict]:
+        query = """
+        MATCH (t:Technology {repoId: $repoId})
+        OPTIONAL MATCH (d:Decision {repoId: $repoId})-[:CHOOSES]->(t)
+        OPTIONAL MATCH (s:Solution {repoId: $repoId})-[:INFORMS]->(d)
+        OPTIONAL MATCH (s)-[:RESOLVES]->(i:Issue)
+        OPTIONAL MATCH (i)-[:CAUSED]->(e:Error)
+        OPTIONAL MATCH (pr:PullRequest)-[:CLOSES]->(i)
+        WITH t, d, s, i, e, pr
+        WHERE d IS NOT NULL OR i IS NOT NULL
+        RETURN t.name AS technology, d.title AS decision, d.rationale AS rationale,
+               i.key AS issue, i.title AS issueTitle, e.type AS error,
+               s.summary AS solution, pr.number AS pull, pr.title AS pullTitle
+        LIMIT 8
+        """
+        with self.driver.session(database=self.database) as session:
+            rows = [dict(row) for row in session.run(query, repoId=repo_id)]
+        if tokens:
+            lowered = [token.lower() for token in tokens]
+            ranked = []
+            for row in rows:
+                blob = " ".join(str(value or "") for value in row.values()).lower()
+                score = sum(1 for token in lowered if token in blob)
+                ranked.append((score, row))
+            ranked.sort(key=lambda item: item[0], reverse=True)
+            rows = [row for score, row in ranked if score] or rows
+        path = []
+        for row in rows[:3]:
+            if row.get("technology"):
+                path.append({"kind": "Technology", "name": row["technology"], "relationship": "CHOOSES"})
+            if row.get("decision"):
+                path.append({"kind": "Decision", "name": row["decision"], "relationship": "INFORMS", "note": row.get("rationale")})
+            if row.get("issue"):
+                path.append({"kind": "Issue", "name": f"{row['issue']}: {row.get('issueTitle') or ''}".strip(), "relationship": "CAUSED"})
+            if row.get("error"):
+                path.append({"kind": "Error", "name": row["error"], "relationship": "RESOLVES"})
+            if row.get("solution"):
+                path.append({"kind": "Solution", "name": row["solution"], "relationship": "CLOSES"})
+            if row.get("pull"):
+                path.append({"kind": "PullRequest", "name": f"#{row['pull']} {row.get('pullTitle') or ''}".strip(), "relationship": ""})
+        seen = set()
+        unique = []
+        for item in path:
+            key = (item["kind"], item["name"])
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(item)
+        return unique
+
+    def file_record(self, repo_id: str, path: str) -> dict | None:
+        query = """
+        MATCH (r:Repository {id: $repoId})
+        MATCH (f:File {repoId: $repoId, path: $path})
+        OPTIONAL MATCH (f)-[:DEFINES]->(s)
+        RETURN r.path AS root, properties(f) AS file, collect(DISTINCT {name: s.name, kind: labels(s)[0], line: s.line, signature: s.signature}) AS symbols
+        """
+        with self.driver.session(database=self.database) as session:
+            record = session.run(query, repoId=repo_id, path=path).single()
+        return dict(record) if record else None
+
+    def memory_panel(self, repo_id: str) -> dict:
+        with self.driver.session(database=self.database) as session:
+            decisions = [
+                dict(row)
+                for row in session.run(
+                    """
+                    MATCH (d:Decision {repoId: $repoId})
+                    OPTIONAL MATCH (d)-[:CHOOSES]->(t:Technology)
+                    OPTIONAL MATCH (s:Solution)-[:INFORMS]->(d)
+                    WITH d, collect(DISTINCT t.name) AS technologies, collect(DISTINCT s.summary) AS solutions
+                    ORDER BY d.date DESC
+                    RETURN d.id AS id, d.title AS title, d.status AS status, d.rationale AS rationale,
+                           d.source AS source, technologies, solutions
+                    """,
+                    repoId=repo_id,
+                )
+            ]
+            issues = [
+                dict(row)
+                for row in session.run(
+                    """
+                    MATCH (i:Issue {repoId: $repoId})
+                    OPTIONAL MATCH (i)-[:CAUSED]->(e:Error)
+                    OPTIONAL MATCH (sol:Solution)-[:RESOLVES]->(i)
+                    OPTIONAL MATCH (pr:PullRequest)-[:CLOSES]->(i)
+                    RETURN i.id AS id, i.key AS key, i.title AS title, i.status AS status, i.source AS source,
+                           collect(DISTINCT e.type) AS errors, collect(DISTINCT sol.summary) AS solutions,
+                           collect(DISTINCT pr.number) AS pulls
+                    """,
+                    repoId=repo_id,
+                )
+            ]
+            conversations = [
+                dict(row)
+                for row in session.run(
+                    """
+                    MATCH (c:Conversation {repoId: $repoId})
+                    RETURN c.id AS id, c.question AS question, c.headline AS headline, c.mode AS mode, c.createdAt AS createdAt
+                    ORDER BY c.createdAt DESC LIMIT 20
+                    """,
+                    repoId=repo_id,
+                )
+            ]
+        return {"decisions": decisions, "issues": issues, "conversations": conversations}
+
 
 def build_tree(name: str, directories: list[dict], files: list[dict]) -> dict:
     root = {"name": name or "repository", "path": ".", "type": "dir", "children": []}
@@ -604,13 +726,17 @@ def _write_structure(tx, doc: IngestDocument, file_rows: list[dict], class_rows:
     tx.run(
         """
         MERGE (r:Repository {id: $repoId})
-        SET r.name = $name, r.path = $path, r.summary = $summary, r.repoId = $repoId, r.updatedAt = $now
+        SET r.name = $name, r.path = $path, r.summary = $summary, r.repoId = $repoId, r.updatedAt = $now,
+            r.githubUrl = $githubUrl, r.defaultBranch = $defaultBranch, r.languagesJson = $languagesJson
         """,
         repoId=repo_id,
         name=doc.name,
         path=doc.path,
         summary=doc.summary,
         now=_now(),
+        githubUrl=doc.github_url,
+        defaultBranch=doc.default_branch,
+        languagesJson=json.dumps(doc.languages),
     )
     tx.run(
         """
@@ -845,7 +971,7 @@ def _write_memory(tx, doc: IngestDocument) -> None:
                 d.rationale = $rationale, d.context = $context, d.consequences = $consequences,
                 d.date = $date, d.path = $path, d.source = $source
             WITH d
-            OPTIONAL MATCH (d)-[r:ABOUT|DECIDED_BY|SUPERSEDES]->()
+            OPTIONAL MATCH (d)-[r:ABOUT|DECIDED_BY|SUPERSEDES|CHOOSES]->()
             DELETE r
             """,
             id=decision.id,
@@ -883,6 +1009,28 @@ def _write_memory(tx, doc: IngestDocument) -> None:
                 id=decision.id,
                 deciders=decision.decider_ids,
             )
+        if decision.technology_ids:
+            tx.run(
+                """
+                MATCH (d:Decision {id: $id})
+                MATCH (t:Technology)
+                WHERE t.id IN $techs
+                MERGE (d)-[:CHOOSES]->(t)
+                """,
+                id=decision.id,
+                techs=decision.technology_ids,
+            )
+        if decision.informed_by_ids:
+            tx.run(
+                """
+                MATCH (d:Decision {id: $id})
+                MATCH (s:Solution)
+                WHERE s.id IN $solutions
+                MERGE (s)-[:INFORMS]->(d)
+                """,
+                id=decision.id,
+                solutions=decision.informed_by_ids,
+            )
     by_slug = {item.slug: item.id for item in doc.decisions}
     for decision in doc.decisions:
         if not decision.supersedes_slug:
@@ -902,12 +1050,21 @@ def _write_memory(tx, doc: IngestDocument) -> None:
 
     if doc.memory_loaded:
         for label, source, ids in (
-            ("Issue", "memory", [item.id for item in doc.issues]),
-            ("Error", "memory", [item.id for item in doc.errors]),
-            ("Solution", "memory", [item.id for item in doc.solutions]),
-            ("PullRequest", "memory", [item.id for item in doc.pull_requests]),
+            ("Issue", "memory", [item.id for item in doc.issues if item.source == "memory"]),
+            ("Error", "memory", [item.id for item in doc.errors if item.source == "memory"]),
+            ("Solution", "memory", [item.id for item in doc.solutions if item.source == "memory"]),
+            ("PullRequest", "memory", [item.id for item in doc.pull_requests if item.source == "memory"]),
         ):
             _replace_sourced(tx, repo_id, label, source, ids)
+    _replace_sourced(tx, repo_id, "Issue", "github", [item.id for item in doc.issues if item.source == "github"])
+    _replace_sourced(tx, repo_id, "Error", "github", [item.id for item in doc.errors if item.source == "github"])
+    _replace_sourced(
+        tx,
+        repo_id,
+        "PullRequest",
+        "github",
+        [item.id for item in doc.pull_requests if item.source == "github"],
+    )
 
     for issue in doc.issues:
         tx.run(
@@ -928,6 +1085,16 @@ def _write_memory(tx, doc: IngestDocument) -> None:
             source=issue.source,
         )
         _link_about(tx, "Issue", issue.id, repo_id, issue.about_ids, "AFFECTS")
+        tx.run(
+            """
+            MATCH (r:Repository {id: $repoId})
+            MATCH (i:Issue {id: $id})
+            MERGE (r)-[:HAS_ISSUE]->(i)
+            MERGE (i)-[:AFFECTS]->(r)
+            """,
+            repoId=repo_id,
+            id=issue.id,
+        )
     for error in doc.errors:
         tx.run(
             """
@@ -945,6 +1112,18 @@ def _write_memory(tx, doc: IngestDocument) -> None:
             source=error.source,
         )
         _link_about(tx, "Error", error.id, repo_id, error.about_ids, "OCCURS_IN")
+    for issue in doc.issues:
+        if issue.caused_error_ids:
+            tx.run(
+                """
+                MATCH (i:Issue {id: $id})
+                MATCH (e:Error)
+                WHERE e.id IN $errors
+                MERGE (i)-[:CAUSED]->(e)
+                """,
+                id=issue.id,
+                errors=issue.caused_error_ids,
+            )
     for solution in doc.solutions:
         tx.run(
             """
@@ -972,6 +1151,19 @@ def _write_memory(tx, doc: IngestDocument) -> None:
                 id=solution.id,
                 targets=targets,
             )
+        if solution.resolves_issue_ids:
+            tx.run(
+                """
+                MATCH (s:Solution {id: $id})
+                MATCH (d:Decision {repoId: $repoId})-[:ABOUT]->(n)
+                MATCH (i:Issue)-[:AFFECTS]->(n)
+                WHERE i.id IN $issues
+                MERGE (s)-[:INFORMS]->(d)
+                """,
+                id=solution.id,
+                repoId=repo_id,
+                issues=solution.resolves_issue_ids,
+            )
     for pull in doc.pull_requests:
         tx.run(
             """
@@ -979,7 +1171,7 @@ def _write_memory(tx, doc: IngestDocument) -> None:
             SET pr.repoId = $repoId, pr.number = $number, pr.title = $title, pr.status = $status,
                 pr.url = $url, pr.source = $source
             WITH pr
-            OPTIONAL MATCH (pr)-[r:CHANGES|AUTHORED_BY]->()
+            OPTIONAL MATCH (pr)-[r:CHANGES|AUTHORED_BY|CLOSES]->()
             DELETE r
             """,
             id=pull.id,
@@ -1010,6 +1202,26 @@ def _write_memory(tx, doc: IngestDocument) -> None:
                 """,
                 id=pull.id,
                 dev=pull.author_id,
+            )
+        tx.run(
+            """
+            MATCH (r:Repository {id: $repoId})
+            MATCH (pr:PullRequest {id: $id})
+            MERGE (r)-[:HAS_PR]->(pr)
+            """,
+            repoId=repo_id,
+            id=pull.id,
+        )
+        if pull.closes_issue_ids:
+            tx.run(
+                """
+                MATCH (pr:PullRequest {id: $id})
+                MATCH (i:Issue)
+                WHERE i.id IN $issues
+                MERGE (pr)-[:CLOSES]->(i)
+                """,
+                id=pull.id,
+                issues=pull.closes_issue_ids,
             )
 
 

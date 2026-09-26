@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { api, type Briefing, type Health, type ProjectDetail, type ProjectSummary, type TreeNode } from "./api";
 
 type Mode = "auto" | "what" | "why";
+type View = "brief" | "files" | "memory";
 
 export function App() {
   const [health, setHealth] = useState<Health | null>(null);
@@ -9,19 +10,25 @@ export function App() {
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [tree, setTree] = useState<TreeNode | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [question, setQuestion] = useState("Why are amounts stored in integer cents?");
+  const [question, setQuestion] = useState("");
   const [mode, setMode] = useState<Mode>("auto");
+  const [view, setView] = useState<View>("brief");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [path, setPath] = useState("examples/billing-service");
+  const [path, setPath] = useState("");
+  const [github, setGithub] = useState("");
   const [decisionTitle, setDecisionTitle] = useState("");
   const [decisionRationale, setDecisionRationale] = useState("");
   const [decider, setDecider] = useState("");
+  const [connectOpen, setConnectOpen] = useState(false);
 
   const selected = useMemo(
     () => project?.briefings.find((item) => item.id === selectedId) ?? project?.briefings[0] ?? null,
     [project, selectedId],
+  );
+  const showContext = Boolean(
+    view === "brief" && selected && (selected.path?.length || selected.evidence?.length || selected.steps?.length),
   );
 
   async function refreshProjects(selectId?: string) {
@@ -48,22 +55,21 @@ export function App() {
       .health()
       .then(async (status) => {
         setHealth(status);
-        if (status.neo4j === "connected") {
-          await refreshProjects();
-        }
+        if (status.neo4j === "connected") await refreshProjects();
       })
       .catch((err: Error) => setError(err.message));
   }, []);
 
-  async function runIngest(action: () => Promise<{ repositoryId: string; files: number; symbols: number; decisions: number }>) {
+  async function runIngest(action: () => Promise<{ repositoryId: string; files: number; symbols: number; decisions: number; name: string }>) {
     setBusy(true);
     setError(null);
     try {
       const report = await action();
-      setNotice(`Ingested ${report.files} files, ${report.symbols} symbols, ${report.decisions} decisions.`);
+      setNotice(`${report.name} indexed · ${report.files} files · ${report.symbols} symbols · ${report.decisions} decisions`);
+      setConnectOpen(false);
       await refreshProjects(report.repositoryId);
-      const status = await api.health();
-      setHealth(status);
+      setHealth(await api.health());
+      setView("brief");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ingest failed");
     } finally {
@@ -73,14 +79,15 @@ export function App() {
 
   async function onAsk(event: FormEvent) {
     event.preventDefault();
-    if (!project) return;
+    if (!project || !question.trim()) return;
     setBusy(true);
     setError(null);
     try {
-      const briefing = await api.ask(project.id, question, mode);
+      const briefing = await api.ask(project.id, question.trim(), mode);
       const detail = await api.project(project.id);
       setProject(detail);
       setSelectedId(briefing.id);
+      setView("brief");
     } catch (err) {
       setError(err instanceof Error ? err.message : "The graph could not answer");
     } finally {
@@ -102,9 +109,9 @@ export function App() {
       });
       setDecisionTitle("");
       setDecisionRationale("");
-      setNotice("Decision written to the graph. Ask a why-question that uses its words.");
-      const detail = await api.project(project.id);
-      setProject(detail);
+      setNotice("Decision written to Neo4j.");
+      setProject(await api.project(project.id));
+      setView("memory");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not store the decision");
     } finally {
@@ -112,219 +119,330 @@ export function App() {
     }
   }
 
+  const counts = project?.inventory.counts ?? {};
+  const neoOk = health?.neo4j === "connected";
+
   return (
-    <div className="app">
-      <header className="topbar">
+    <div className={`app${showContext ? " with-ctx" : ""}`}>
+      <header className="top">
         <div className="brand">
-          <span className="mark" aria-hidden="true" />
-          <div>
-            <strong>DevMind</strong>
-            <em>Project memory</em>
-          </div>
+          <span className="logo" aria-hidden="true" />
+          <span>DevMind</span>
         </div>
-        <p className="tagline">What the code does, and why the project works this way.</p>
-        <div className="status">
-          <span className={health?.neo4j === "connected" ? "ok" : "down"}>
-            Neo4j {health?.neo4j ?? "checking"}
-          </span>
-          <span>Model {health?.llm ?? "off"}</span>
+        {project && (
+          <div className="tabs" role="tablist">
+            {([
+              ["brief", "Briefing"],
+              ["files", "Files"],
+              ["memory", "Memory"],
+            ] as const).map(([id, label]) => (
+              <button key={id} className={view === id ? "on" : ""} onClick={() => setView(id)} type="button">
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="pills">
+          <span className={neoOk ? "pill ok" : "pill bad"}>{neoOk ? "Neo4j connected" : `Neo4j ${health?.neo4j ?? "…"}`}</span>
+          {health?.llm && health.llm !== "off" && <span className="pill">LLM {health.llm}</span>}
         </div>
       </header>
 
-      {(error || notice || (health && health.neo4j !== "connected")) && (
-        <div className="banner">
-          {health && health.neo4j !== "connected" && (
-            <p>Neo4j is the memory layer. Start it with <code>docker compose up -d</code>, then reload.</p>
-          )}
-          {error && <p className="error">{error}</p>}
-          {notice && <p>{notice}</p>}
+      {(error || notice) && (
+        <div className={`banner ${error ? "bad" : ""}`}>
+          <span>{error || notice}</span>
+          <button type="button" onClick={() => { setError(null); setNotice(null); }}>
+            Dismiss
+          </button>
         </div>
       )}
 
-      <div className="shell">
-        <aside className="panel side">
-          <section>
-            <h2>Repository</h2>
-            <div className="project-list">
+      {!project ? (
+        <EmptyState
+          busy={busy}
+          github={github}
+          path={path}
+          onGithub={setGithub}
+          onPath={setPath}
+          onGithubSubmit={() => runIngest(() => api.github(github))}
+          onPathSubmit={() => runIngest(() => api.ingest(path))}
+          onDemo={() => runIngest(api.demoBilling)}
+        />
+      ) : (
+        <div className="layout">
+          <aside className="rail">
+            <div className="rail-head">
+              <span>Repositories</span>
+              <button type="button" className="text-btn" onClick={() => setConnectOpen((open) => !open)}>
+                {connectOpen ? "Cancel" : "Add"}
+              </button>
+            </div>
+            <div className="repos">
               {projects.map((item) => (
                 <button
                   key={item.id}
-                  className={item.id === project?.id ? "active" : ""}
+                  type="button"
+                  className={item.id === project.id ? "repo on" : "repo"}
                   onClick={() => refreshProjects(item.id).catch((err: Error) => setError(err.message))}
                 >
-                  <strong>{item.name}</strong>
+                  <b>{item.name}</b>
                   <span>{item.files} files</span>
                 </button>
               ))}
-              {projects.length === 0 && <p className="muted">No repository is in the graph yet.</p>}
             </div>
-            <div className="actions">
-              <button disabled={busy} onClick={() => runIngest(api.demoBilling)}>
-                Load billing sample
-              </button>
-              <button disabled={busy} onClick={() => runIngest(api.demoSelf)}>
-                Ingest DevMind
-              </button>
-            </div>
-            <form
-              className="stack"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void runIngest(() => api.ingest(path));
-              }}
-            >
-              <label>
-                Local path
-                <input value={path} onChange={(event) => setPath(event.target.value)} />
-              </label>
-              <button type="submit" disabled={busy}>
-                Ingest path
-              </button>
-            </form>
-          </section>
-
-          {project && (
-            <section>
-              <h2>Graph inventory</h2>
-              <dl className="inventory">
-                {Object.entries(project.inventory.counts).map(([label, count]) => (
-                  <div key={label}>
-                    <dt>{label}</dt>
-                    <dd>{count}</dd>
-                  </div>
-                ))}
-              </dl>
-              <h3>Relationships</h3>
-              <ul className="rels">
-                {Object.entries(project.inventory.relationships).map(([type, count]) => (
-                  <li key={type}>
-                    <span>{type}</span>
-                    <span>{count}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {tree && (
-            <section>
-              <h2>Files</h2>
-              <div className="tree">
-                <TreeNodes nodes={tree.children} depth={0} />
+            {connectOpen && (
+              <div className="connect">
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void runIngest(() => api.github(github));
+                  }}
+                >
+                  <input
+                    value={github}
+                    onChange={(event) => setGithub(event.target.value)}
+                    placeholder="github.com/owner/repo"
+                  />
+                  <button className="primary" type="submit" disabled={busy || github.length < 12}>
+                    Clone
+                  </button>
+                </form>
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void runIngest(() => api.ingest(path));
+                  }}
+                >
+                  <input value={path} onChange={(event) => setPath(event.target.value)} placeholder="Local folder path" />
+                  <button type="submit" disabled={busy || !path}>
+                    Scan
+                  </button>
+                </form>
               </div>
-            </section>
-          )}
-        </aside>
-
-        <main className="panel briefings">
-          <form className="composer" onSubmit={onAsk}>
-            <div className="composer-head">
-              <h2>Ask the project</h2>
-              <div className="modes" role="radiogroup" aria-label="Briefing mode">
-                {(["auto", "what", "why"] as Mode[]).map((item) => (
-                  <label key={item} className={mode === item ? "active" : ""}>
-                    <input
-                      type="radio"
-                      name="mode"
-                      value={item}
-                      checked={mode === item}
-                      onChange={() => setMode(item)}
-                    />
-                    {item}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <textarea
-              value={question}
-              onChange={(event) => setQuestion(event.target.value)}
-              rows={3}
-              placeholder="What does calculate_tax do?"
-            />
-            <div className="composer-foot">
-              <p>Answers are walks on the Neo4j graph. Missing rationale stays missing.</p>
-              <button type="submit" disabled={busy || !project}>
-                {busy ? "Reading the graph…" : "Brief"}
-              </button>
-            </div>
-          </form>
-
-          {!project && (
-            <div className="empty">
-              <h3>Load a repository into memory</h3>
-              <p>
-                The billing sample has code, a superseded decision, a webhook incident, and the pull request that fixed it.
-                Ask what <code>calculate_tax</code> does, then ask why the amounts are integer cents.
-              </p>
-            </div>
-          )}
-
-          {project && selected && <BriefingCard briefing={selected} />}
-
-          {project && project.briefings.length > 1 && (
-            <section className="history">
-              <h2>Stored conversations</h2>
-              <ul>
-                {project.briefings.map((item) => (
-                  <li key={item.id}>
-                    <button className={item.id === selected?.id ? "active" : ""} onClick={() => setSelectedId(item.id)}>
-                      <span className={`stamp ${item.mode}`}>{item.mode}</span>
-                      <span>{item.headline}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-        </main>
-
-        <aside className="panel evidence">
-          <section>
-            <h2>Evidence trail</h2>
-            {selected ? (
-              <ol className="trail">
-                {selected.evidence.map((item, index) => (
-                  <li key={`${item.source}-${item.relationship}-${item.target}-${index}`}>
-                    <span>{item.source}</span>
-                    <em>{item.relationship}</em>
-                    <span>{item.target}</span>
-                  </li>
-                ))}
-                {selected.evidence.length === 0 && <p className="muted">This briefing did not walk any relationships.</p>}
-              </ol>
-            ) : (
-              <p className="muted">The relationships used for a briefing show up here, taken from Neo4j.</p>
             )}
-            {selected && <p className="voice">Voice: {selected.voice}</p>}
-          </section>
+            <dl className="stats">
+              {(["File", "Function", "Decision", "Issue", "PullRequest", "Technology"] as const).map((label) => (
+                <div key={label}>
+                  <dt>{label === "PullRequest" ? "PRs" : `${label}s`}</dt>
+                  <dd>{counts[label] ?? 0}</dd>
+                </div>
+              ))}
+            </dl>
+          </aside>
 
-          <section>
-            <h2>Record a decision</h2>
-            <p className="muted">This becomes a Decision node. Later why-questions can find it by its wording.</p>
-            <form className="stack" onSubmit={onDecision}>
-              <label>
-                Title
-                <input value={decisionTitle} onChange={(event) => setDecisionTitle(event.target.value)} required />
-              </label>
-              <label>
-                Rationale
-                <textarea
-                  value={decisionRationale}
-                  onChange={(event) => setDecisionRationale(event.target.value)}
-                  rows={4}
-                  required
-                />
-              </label>
-              <label>
-                Decider
-                <input value={decider} onChange={(event) => setDecider(event.target.value)} />
-              </label>
-              <button type="submit" disabled={busy || !project}>
-                Write to graph
-              </button>
-            </form>
-          </section>
-        </aside>
+          <main className="stage">
+            {view === "brief" && (
+              <>
+                <form className="ask" onSubmit={onAsk}>
+                  <textarea
+                    value={question}
+                    onChange={(event) => setQuestion(event.target.value)}
+                    rows={2}
+                    placeholder={`Ask about ${project.name}…`}
+                  />
+                  <div className="ask-bar">
+                    <div className="seg">
+                      {(["auto", "what", "why"] as Mode[]).map((item) => (
+                        <button key={item} type="button" className={mode === item ? "on" : ""} onClick={() => setMode(item)}>
+                          {item}
+                        </button>
+                      ))}
+                    </div>
+                    <button className="primary" type="submit" disabled={busy || !question.trim()}>
+                      {busy ? "Walking graph…" : "Ask"}
+                    </button>
+                  </div>
+                </form>
+
+                {selected ? (
+                  <BriefingCard briefing={selected} />
+                ) : (
+                  <p className="empty-line">No briefings yet. Ask what a function does, or why a decision was made.</p>
+                )}
+
+                {project.briefings.length > 1 && (
+                  <section className="history">
+                    <h2>Earlier</h2>
+                    {project.briefings.slice(0, 6).map((item) => (
+                      <button key={item.id} type="button" className={item.id === selected?.id ? "on" : ""} onClick={() => setSelectedId(item.id)}>
+                        <span className={`stamp ${item.mode}`}>{item.mode}</span>
+                        {item.headline}
+                      </button>
+                    ))}
+                  </section>
+                )}
+              </>
+            )}
+
+            {view === "files" && (
+              <section className="explorer">
+                <header className="page-head">
+                  <h1>{project.name}</h1>
+                  {project.summary && <p>{project.summary}</p>}
+                </header>
+                {tree ? <TreeNodes nodes={tree.children} depth={0} /> : <p className="empty-line">No file tree in the graph yet.</p>}
+              </section>
+            )}
+
+            {view === "memory" && (
+              <section className="memory">
+                <header className="page-head">
+                  <h1>Graph memory</h1>
+                  <p>Decisions and issues stored in Neo4j for this repository.</p>
+                </header>
+                <div className="cards">
+                  {(project.memory?.decisions ?? []).map((item) => (
+                    <article key={item.id}>
+                      <span className="stamp why">decision</span>
+                      <h3>{item.title}</h3>
+                      <p>{item.rationale}</p>
+                    </article>
+                  ))}
+                  {(project.memory?.issues ?? []).map((item) => (
+                    <article key={item.id}>
+                      <span className="stamp what">{item.key}</span>
+                      <h3>{item.title}</h3>
+                      <p>
+                        {item.status}
+                        {item.errors?.length ? ` · ${item.errors.join(", ")}` : ""}
+                        {item.pulls?.length ? ` · PR ${item.pulls.join(", ")}` : ""}
+                      </p>
+                    </article>
+                  ))}
+                  {(project.memory?.decisions ?? []).length === 0 && (project.memory?.issues ?? []).length === 0 && (
+                    <p className="empty-line">No decisions or issues ingested yet.</p>
+                  )}
+                </div>
+                <form className="decision-form" onSubmit={onDecision}>
+                  <h2>Record a decision</h2>
+                  <input value={decisionTitle} onChange={(event) => setDecisionTitle(event.target.value)} placeholder="Title" required />
+                  <textarea
+                    value={decisionRationale}
+                    onChange={(event) => setDecisionRationale(event.target.value)}
+                    rows={3}
+                    placeholder="Why the project works this way"
+                    required
+                  />
+                  <input value={decider} onChange={(event) => setDecider(event.target.value)} placeholder="Decider (optional)" />
+                  <button className="primary" type="submit" disabled={busy}>
+                    Write to Neo4j
+                  </button>
+                </form>
+              </section>
+            )}
+          </main>
+
+          {showContext && selected && (
+            <aside className="context">
+              {selected.path && selected.path.length > 0 && (
+                <>
+                  <h2>Why path</h2>
+                  <ol className="path">
+                    {selected.path.map((item, index) => (
+                      <li key={`${item.kind}-${item.name}-${index}`}>
+                        <span>{item.kind}</span>
+                        <b>{item.name}</b>
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              )}
+              {selected.evidence && selected.evidence.length > 0 && (
+                <>
+                  <h2>Evidence</h2>
+                  <ul className="evidence">
+                    {selected.evidence.slice(0, 12).map((item, index) => (
+                      <li key={`${item.source}-${item.relationship}-${item.target}-${index}`}>
+                        <span>{item.source}</span>
+                        <em>{item.relationship}</em>
+                        <span>{item.target}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {selected.steps && selected.steps.length > 0 && (
+                <>
+                  <h2>Agent</h2>
+                  <ol className="agent">
+                    {selected.steps.map((step) => (
+                      <li key={step.id}>
+                        <b>{step.label}</b>
+                        <span>{step.detail}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              )}
+            </aside>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({
+  busy,
+  github,
+  path,
+  onGithub,
+  onPath,
+  onGithubSubmit,
+  onPathSubmit,
+  onDemo,
+}: {
+  busy: boolean;
+  github: string;
+  path: string;
+  onGithub: (value: string) => void;
+  onPath: (value: string) => void;
+  onGithubSubmit: () => void;
+  onPathSubmit: () => void;
+  onDemo: () => void;
+}) {
+  return (
+    <div className="onboard">
+      <div className="onboard-copy">
+        <h1>Connect a repository</h1>
+        <p>DevMind indexes the repo into Neo4j and answers from that graph — not from a chat transcript.</p>
+      </div>
+      <div className="onboard-grid">
+        <form
+          className="panel"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onGithubSubmit();
+          }}
+        >
+          <h2>GitHub</h2>
+          <p>Public URL, or a private repo if a token is configured.</p>
+          <input value={github} onChange={(event) => onGithub(event.target.value)} placeholder="https://github.com/owner/repo" />
+          <button className="primary" type="submit" disabled={busy || github.length < 12}>
+            Clone and index
+          </button>
+        </form>
+        <form
+          className="panel"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onPathSubmit();
+          }}
+        >
+          <h2>Local folder</h2>
+          <p>Path on this machine. The API server must be able to read it.</p>
+          <input value={path} onChange={(event) => onPath(event.target.value)} placeholder="C:\code\my-app" />
+          <button type="submit" disabled={busy || !path}>
+            Scan folder
+          </button>
+        </form>
+        <div className="panel">
+          <h2>Sample</h2>
+          <p>Load the bundled billing-service to see decisions, issues, and a why-path.</p>
+          <button type="button" disabled={busy} onClick={onDemo}>
+            Index billing-service
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -332,16 +450,17 @@ export function App() {
 
 function BriefingCard({ briefing }: { briefing: Briefing }) {
   return (
-    <article className="briefing">
+    <article className="answer">
       <header>
         <span className={`stamp ${briefing.mode}`}>{briefing.mode}</span>
+        {briefing.intent && <span className="muted">{briefing.intent.replaceAll("_", " ")}</span>}
         <time>{new Date(briefing.createdAt).toLocaleString()}</time>
       </header>
-      <p className="question">{briefing.question}</p>
-      <h3>{briefing.headline}</h3>
-      <div className="columns">
+      <p className="asked">{briefing.question}</p>
+      <h2>{briefing.headline}</h2>
+      <div className="split">
         <section>
-          <h4>What</h4>
+          <h3>What</h3>
           <ul>
             {briefing.what.map((line) => (
               <li key={line}>{line}</li>
@@ -349,7 +468,7 @@ function BriefingCard({ briefing }: { briefing: Briefing }) {
           </ul>
         </section>
         <section>
-          <h4>Why</h4>
+          <h3>Why</h3>
           {briefing.why.length > 0 ? (
             <ul>
               {briefing.why.map((line) => (
@@ -357,7 +476,7 @@ function BriefingCard({ briefing }: { briefing: Briefing }) {
               ))}
             </ul>
           ) : (
-            <p className="muted">No rationale was retrieved.</p>
+            <p className="muted">No recorded rationale in the graph.</p>
           )}
         </section>
       </div>
@@ -365,6 +484,16 @@ function BriefingCard({ briefing }: { briefing: Briefing }) {
         <div className="gaps">
           {briefing.gaps.map((gap) => (
             <p key={gap}>{gap}</p>
+          ))}
+        </div>
+      )}
+      {briefing.citations && briefing.citations.length > 0 && (
+        <div className="cites">
+          {briefing.citations.slice(0, 8).map((item) => (
+            <span key={`${item.kind}-${item.name}-${item.path}`}>
+              {item.path}
+              {item.line ? `:${item.line}` : ""}
+            </span>
           ))}
         </div>
       )}
@@ -378,11 +507,11 @@ function TreeNodes({ nodes, depth }: { nodes: TreeNode[]; depth: number }) {
     return a.name.localeCompare(b.name);
   });
   return (
-    <ul>
+    <ul className="tree">
       {ordered.map((node) => (
         <li key={node.path}>
-          <span style={{ paddingLeft: depth * 12 }} className={node.type}>
-            {node.type === "dir" ? node.name || "/" : node.name}
+          <span style={{ paddingLeft: depth * 14 }} className={node.type}>
+            {node.type === "dir" ? `${node.name || "/"}/` : node.name}
           </span>
           {node.children.length > 0 && <TreeNodes nodes={node.children} depth={depth + 1} />}
         </li>

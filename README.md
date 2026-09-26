@@ -23,17 +23,21 @@ If the graph has no recorded reason, the briefing says so.
 | Developer | Deciders, pull-request authors, and git authors |
 | Conversation, Message | A briefing written back into the graph, linked to the nodes it used |
 
-Relationships include `CONTAINS`, `DEFINES`, `CALLS`, `IMPORTS`, `EXTENDS`, `USES`, `ABOUT`, `DECIDED_BY`, `SUPERSEDES`, `AFFECTS`, `OCCURS_IN`, `RESOLVES`, `CHANGES`, `AUTHORED_BY`, `AUTHORED`, `WORKS_ON`, `IN_REPOSITORY`, and `HAS_MESSAGE`.
+Relationships include `CONTAINS`, `DEFINES`, `CALLS`, `IMPORTS`, `EXTENDS`, `USES`, `HAS_ISSUE`, `HAS_PR`, `CAUSED`, `CHOOSES`, `INFORMS`, `CLOSES`, `ABOUT`, `DECIDED_BY`, `SUPERSEDES`, `AFFECTS`, `OCCURS_IN`, `RESOLVES`, `CHANGES`, `AUTHORED_BY`, `AUTHORED`, `WORKS_ON`, `IN_REPOSITORY`, and `HAS_MESSAGE`.
 
 Re-ingesting a repository rebuilds the code structure and refreshes ADR and `.devmind/memory.json` nodes. Decisions you record in the UI (`source: user`) stay.
 
 ## How a briefing is produced
 
-1. The question is classified as what, why, or both. A project-level question such as "Why does the project work this way?" reads the repository overview.
-2. Tokens are resolved to nodes with exact names, then the full-text index, then a contains search.
-3. The neighborhood walk adds defining files, symbols, decisions, issues, and technologies. It does not load the whole repository.
-4. Bullets are written only from those facts. A configured language model may rephrase a bullet, and only when the sentence still overlaps the retrieved facts. Evidence relationships always come from Neo4j.
-5. The briefing is stored as a `Conversation` with two `Message` nodes and `ABOUT` links to the nodes it used.
+1. Intent detection (callers, technologies, bug history, how-fixed, why-technology, overview).
+2. Neo4j retrieval of a bounded subgraph — not a chat log.
+3. Code neighborhood (files, functions, imports, calls).
+4. Context builder from those relationships.
+5. Optional LLM rephrase, grounded in graph facts.
+6. Citations, WHY path (`Technology → Decision → Issue → Solution → PR`).
+7. Conversation stored in Neo4j. Phrases like “remember that we decided…” extract a Decision node.
+
+Open `http://127.0.0.1:5173` (Vite) or `http://127.0.0.1:3000` (Next.js + React Flow). Connect a GitHub repo with the GitHub URL field (`GITHUB_TOKEN` in `.env` for private repos). Zip upload: `POST /api/ingest/upload`.
 
 ## Run it
 
@@ -61,7 +65,16 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`. The UI talks to the API through the Vite proxy.
+Open `http://127.0.0.1:5173`.
+
+Next.js console with an interactive graph (from `web`):
+
+```bash
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:3000`.
 
 Copy `.env.example` to `.env` to point at Neo4j Aura (`neo4j+s://…`) or a local instance that is not `bolt://localhost:7687`. Aura credentials use `NEO4J_USERNAME`. The password stays in `.env`; that file is gitignored.
 
