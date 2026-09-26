@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
-from app.config import REPO_ROOT
+from app.config import REPO_ROOT, get_settings
 from app.graph.crud import LABELS, RELS
 from app.graph.store import QUERIES, SCHEMA
 from app.ingest.github import GitHubError, clone_or_update, parse_github_url
-from app.ingest.pipeline import IngestLimitError, scan
+from app.ingest.neo4j_ingest import ingest_to_neo4j
+from app.ingest.pipeline import IngestLimitError
 from app.reasoning.agent import ask, read_source
 
 router = APIRouter(prefix="/api")
@@ -80,12 +82,11 @@ def _store(request: Request):
 
 def _ingest(store, path: Path, name: str | None, github_url: str | None = None, github_token: str = "") -> dict:
     try:
-        document = scan(path, name, github_url=github_url, github_token=github_token)
+        return ingest_to_neo4j(store, path, name, github_url=github_url, github_token=github_token)
     except IngestLimitError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return store.apply(document)
 
 
 def _resolve_path(raw: str) -> Path:
@@ -100,6 +101,7 @@ def _resolve_path(raw: str) -> Path:
 
 @router.get("/health")
 def health(request: Request) -> dict:
+    request.app.state.settings = get_settings()
     settings = request.app.state.settings
     store = request.app.state.store
     if store is not None and not request.app.state.neo4j_ok:
@@ -114,7 +116,9 @@ def health(request: Request) -> dict:
     return {
         "status": "ok" if connected else "degraded",
         "neo4j": "connected" if connected else "unavailable",
-        "llm": settings.llm_model if settings.llm_enabled else "off",
+        "llm": (
+            f"{settings.llm_provider}:{settings.llm_model}" if settings.llm_enabled else "off"
+        ),
         "github": "configured" if settings.github_token else "public-only",
         "error": request.app.state.neo4j_error,
     }
@@ -200,6 +204,25 @@ def project(project_id: str, request: Request) -> dict:
         "summary": repository.get("summary"),
         "updatedAt": repository.get("updatedAt"),
         "githubUrl": repository.get("githubUrl"),
+        "github": {
+            "url": repository.get("githubUrl"),
+            "owner": repository.get("githubOwner"),
+            "name": repository.get("githubName"),
+            "fullName": repository.get("githubFullName"),
+            "stars": repository.get("githubStars"),
+            "forks": repository.get("githubForks"),
+            "language": repository.get("githubLanguage"),
+            "license": repository.get("githubLicense"),
+            "visibility": repository.get("githubVisibility"),
+            "topics": json.loads(repository.get("githubTopicsJson") or "[]")
+            if isinstance(repository.get("githubTopicsJson"), str)
+            else repository.get("githubTopicsJson") or [],
+            "defaultBranch": repository.get("defaultBranch") or repository.get("githubDefaultBranch"),
+            "openIssues": repository.get("githubOpenIssues"),
+            "homepage": repository.get("githubHomepage"),
+        }
+        if repository.get("githubUrl")
+        else None,
         "languages": repository.get("languagesJson"),
         "technologies": found["technologies"],
         "decisions": found["decisions"],
@@ -242,6 +265,7 @@ def project_file(project_id: str, path: str, request: Request) -> dict:
 def project_ask(project_id: str, body: AskIn, request: Request) -> dict:
     if body.mode not in {None, "what", "why", "both"}:
         raise HTTPException(status_code=400, detail="Mode must be what, why, or both.")
+    request.app.state.settings = get_settings()
     try:
         return ask(_store(request), request.app.state.settings, project_id, body.question.strip(), body.mode)
     except LookupError as exc:

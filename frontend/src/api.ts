@@ -42,6 +42,21 @@ export type ProjectDetail = {
   summary?: string;
   updatedAt?: string;
   githubUrl?: string;
+  github?: {
+    url?: string;
+    owner?: string;
+    name?: string;
+    fullName?: string;
+    stars?: number;
+    forks?: number;
+    language?: string;
+    license?: string;
+    visibility?: string;
+    topics?: string[];
+    defaultBranch?: string;
+    openIssues?: number;
+    homepage?: string;
+  } | null;
   technologies: { name: string; category: string }[];
   decisions: { id: string; title: string; status: string; date?: string }[];
   inventory: Inventory;

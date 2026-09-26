@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import posixpath
 from pathlib import Path
 
@@ -22,8 +21,9 @@ from app.ingest.model import (
     SymbolRec,
     TechRec,
 )
-from app.ingest.parsers import is_adr_path, language_for, parse_adr, parse_source, readme_summary
+from app.ingest.parsers import is_adr_path, parse_adr, parse_source, readme_summary
 from app.ingest.resolve import resolve_targets
+from app.ingest.scanner import MAX_FILES, ExtractedFile, extract_repository
 from app.ingest.technologies import (
     category_for,
     import_matches_technology,
@@ -31,41 +31,6 @@ from app.ingest.technologies import (
     technologies_in_manifest,
 )
 
-MAX_FILES = 8000
-MAX_PARSE_BYTES = 400_000
-SKIP_DIRS = {
-    ".git",
-    "node_modules",
-    ".venv",
-    "venv",
-    "__pycache__",
-    "dist",
-    "build",
-    ".next",
-    ".turbo",
-    "coverage",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    "neo4j-data",
-}
-SKIP_NAMES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock"}
-SKIP_SUFFIXES = {
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".webp",
-    ".ico",
-    ".pdf",
-    ".zip",
-    ".gz",
-    ".woff",
-    ".woff2",
-    ".ttf",
-    ".pyc",
-    ".map",
-}
 _SKIP_BASES = {"object", "exception", "baseexception", "abc", "enum"}
 
 
@@ -84,10 +49,10 @@ def scan(
         raise FileNotFoundError(f"{root} is not a directory")
 
     repo_id = repo_id_for(root)
-    paths = _walk(root)
-    if len(paths) > MAX_FILES:
+    extracted = extract_repository(root)
+    if len(extracted) > MAX_FILES:
         raise IngestLimitError(
-            f"Refusing to ingest {len(paths)} files (limit {MAX_FILES}). Choose a project directory."
+            f"Refusing to ingest {len(extracted)} files (limit {MAX_FILES}). Choose a project directory."
         )
 
     doc = IngestDocument(
@@ -103,23 +68,20 @@ def scan(
     classes_by_name: dict[str, list[SymbolRec]] = {}
     developers: dict[str, DeveloperRec] = {}
 
-    for path in paths:
-        rel = path.relative_to(root).as_posix()
+    for item in extracted:
+        rel = item.rel
         directory_id = _ensure_directories(repo_id, rel, directories)
-        text, readable = _read(path)
-        digest = hashlib.sha256(text.encode("utf-8") if readable else path.name.encode()).hexdigest()
-        language = language_for(rel)
-        module = parse_source(rel, text) if readable and path.stat().st_size <= MAX_PARSE_BYTES else None
+        module = parse_source(rel, item.text) if item.readable else None
         file_id = node_id(repo_id, "file", rel)
         files_by_path[rel] = file_id
         doc.files.append(
             FileRec(
                 id=file_id,
                 path=rel,
-                name=path.name,
-                language=language,
-                loc=text.count("\n") + 1 if text else 0,
-                sha256=digest,
+                name=item.path.name,
+                language=item.language,
+                loc=item.loc,
+                sha256=item.sha256,
                 directory_id=directory_id,
                 docstring=module.docstring if module else None,
                 imports=list(module.imports) if module else [],
@@ -164,10 +126,14 @@ def scan(
     _link_imports(doc, files_by_path)
     _link_calls(doc, parsed_calls)
     _link_extends(doc, classes_by_name)
-    _collect_technologies(doc, paths, root, files_by_path)
+    _collect_technologies(doc, extracted, files_by_path)
     _collect_developers(doc, root, developers)
-    _collect_adrs(doc, paths, root, files_by_path, symbols_by_name, developers)
+    _collect_adrs(doc, extracted, files_by_path, symbols_by_name, developers)
     _collect_memory(doc, root, files_by_path, symbols_by_name, developers)
+    if not github_url and (root / ".git").exists():
+        from app.ingest.github import github_url_from_git
+
+        github_url = github_url_from_git(root)
     if github_url:
         from app.ingest.github import fetch_github_memory
 
@@ -189,29 +155,6 @@ def scan(
     doc.languages = counts
     doc.developers = list(developers.values())
     return doc
-
-
-def _walk(root: Path) -> list[Path]:
-    found: list[Path] = []
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
-            continue
-        if path.name in SKIP_NAMES or path.suffix.lower() in SKIP_SUFFIXES:
-            continue
-        found.append(path)
-    found.sort()
-    return found
-
-
-def _read(path: Path) -> tuple[str, bool]:
-    if path.stat().st_size > MAX_PARSE_BYTES:
-        return "", False
-    try:
-        return path.read_text(encoding="utf-8", errors="replace"), True
-    except OSError:
-        return "", False
 
 
 def _ensure_directories(repo_id: str, rel: str, directories: dict[str, DirRec]) -> str:
@@ -309,16 +252,12 @@ def _link_extends(doc: IngestDocument, classes_by_name: dict[str, list[SymbolRec
 
 def _collect_technologies(
     doc: IngestDocument,
-    paths: list[Path],
-    root: Path,
+    extracted: list[ExtractedFile],
     files_by_path: dict[str, str],
 ) -> None:
     techs: dict[str, TechRec] = {}
-    manifests: dict[str, list[str]] = {}
-    for path in paths:
-        rel = path.relative_to(root).as_posix()
-        text = doc_file_text(path)
-        packages = technologies_in_manifest(rel, text)
+    for item in extracted:
+        packages = technologies_in_manifest(item.rel, item.text)
         if not packages:
             continue
         for package, manifest in packages:
@@ -335,7 +274,6 @@ def _collect_technologies(
             file_id = files_by_path.get(manifest)
             if file_id and file_id not in record.file_ids:
                 record.file_ids.append(file_id)
-            manifests.setdefault(key, []).append(manifest)
 
     known = set(techs)
     for file in doc.files:
@@ -344,15 +282,6 @@ def _collect_technologies(
             if matched and file.id not in techs[matched].file_ids:
                 techs[matched].file_ids.append(file.id)
     doc.technologies = list(techs.values())
-
-
-def doc_file_text(path: Path) -> str:
-    if path.stat().st_size > MAX_PARSE_BYTES:
-        return ""
-    try:
-        return path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
 
 
 def _collect_developers(doc: IngestDocument, root: Path, developers: dict[str, DeveloperRec]) -> None:
@@ -369,20 +298,19 @@ def _collect_developers(doc: IngestDocument, root: Path, developers: dict[str, D
 
 def _collect_adrs(
     doc: IngestDocument,
-    paths: list[Path],
-    root: Path,
+    extracted: list[ExtractedFile],
     files_by_path: dict[str, str],
     symbols_by_name: dict[str, list[tuple[str, str]]],
     developers: dict[str, DeveloperRec],
 ) -> None:
-    for path in paths:
-        rel = path.relative_to(root).as_posix()
+    for item in extracted:
+        rel = item.rel
         if not is_adr_path(rel):
             continue
-        parsed = parse_adr(rel, doc_file_text(path))
+        parsed = parse_adr(rel, item.text)
         if parsed is None:
             continue
-        slug = path.stem
+        slug = item.path.stem
         decider_ids = [_developer_by_name(developers, doc.repo_id, name) for name in parsed.deciders]
         about = resolve_targets(parsed.affects, files_by_path, symbols_by_name)
         file_id = files_by_path.get(rel)

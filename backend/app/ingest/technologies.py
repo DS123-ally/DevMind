@@ -11,17 +11,25 @@ CATEGORIES = {
     "django": "web",
     "starlette": "web",
     "uvicorn": "web",
+    "express": "web",
+    "next": "web",
     "react": "ui",
     "react-dom": "ui",
     "vite": "tooling",
     "neo4j": "graph",
     "stripe": "payments",
     "httpx": "http",
+    "axios": "http",
     "pydantic": "data",
+    "sqlalchemy": "data",
+    "prisma": "data",
     "typescript": "language",
     "pytest": "test",
+    "jest": "test",
     "python": "runtime",
     "node": "runtime",
+    "redis": "cache",
+    "celery": "jobs",
 }
 
 _REQUIREMENT = re.compile(r"^[A-Za-z0-9_.-]+")
@@ -50,6 +58,16 @@ def technologies_in_manifest(path: str, text: str) -> list[tuple[str, str]]:
     elif name == "package.json":
         found.extend(_package_json(text))
     elif name in {"pyproject.toml", "pipfile"}:
+        found.extend(_quoted_packages(text))
+    elif name == "go.mod":
+        found.extend(_go_mod(text))
+    elif name == "cargo.toml":
+        found.extend(_quoted_packages(text))
+    elif name == "composer.json":
+        found.extend(_composer(text))
+    elif name.endswith(".csproj"):
+        found.extend(re.findall(r"""PackageReference\s+Include=["']([^"']+)["']""", text))
+    elif name in {"pom.xml", "build.gradle", "build.gradle.kts"}:
         found.extend(_quoted_packages(text))
     elif name == "dockerfile" or name.endswith(".dockerfile"):
         found.extend(_images(text, _FROM))
@@ -104,6 +122,26 @@ def _images(text: str, pattern: re.Pattern[str]) -> list[str]:
         if image and image not in {"scratch", "alpine"}:
             names.append(image)
     return names
+
+
+def _composer(text: str) -> list[str]:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    packages: list[str] = []
+    for key in ("require", "require-dev"):
+        block = data.get(key) or {}
+        if isinstance(block, dict):
+            packages.extend(str(name) for name in block if name != "php")
+    return packages
+
+
+def _go_mod(text: str) -> list[str]:
+    packages: list[str] = []
+    for match in re.finditer(r"(?:^require\s+|^\s+)([^\s]+)\s+v\d", text, re.MULTILINE):
+        packages.append(match.group(1).rsplit("/", 1)[-1])
+    return packages
 
 
 def _unique(items: list[str]) -> list[str]:

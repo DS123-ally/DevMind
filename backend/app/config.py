@@ -19,8 +19,7 @@ def load_dotenv(path: Path) -> None:
             continue
         key, value = line.split("=", 1)
         key, value = key.strip(), value.strip().strip('"').strip("'")
-        if not os.environ.get(key):
-            os.environ[key] = value
+        os.environ[key] = value
 
 
 @dataclass(frozen=True)
@@ -39,7 +38,19 @@ class Settings:
 
     @property
     def llm_enabled(self) -> bool:
-        return bool(self.llm_base_url and self.llm_model)
+        return bool(self.llm_base_url and self.llm_model and self.llm_api_key)
+
+    @property
+    def llm_provider(self) -> str:
+        if "openrouter.ai" in self.llm_base_url:
+            return "openrouter"
+        if "graphacademy.neo4j.com" in self.llm_base_url:
+            return "graphacademy"
+        if "groq.com" in self.llm_base_url:
+            return "groq"
+        if self.llm_base_url:
+            return "openai-compatible"
+        return "off"
 
 
 def get_settings() -> Settings:
@@ -55,11 +66,7 @@ def get_settings() -> Settings:
         or os.environ.get("GROQ_API_KEY")
         or os.environ.get("OPENAI_API_KEY")
         or "",
-        llm_model=os.environ.get("DEVMIND_LLM_MODEL")
-        or os.environ.get("OPENAI_MODEL")
-        or os.environ.get("OPENROUTER_MODEL")
-        or os.environ.get("GROQ_MODEL")
-        or ("gpt-4o-mini" if _llm_base_url() else ""),
+        llm_model=_llm_model(),
         github_token=os.environ.get("GITHUB_TOKEN", ""),
         cache_dir=os.environ.get("DEVMIND_CACHE_DIR", str(REPO_ROOT / ".cache")),
         host=os.environ.get("DEVMIND_HOST", "127.0.0.1"),
@@ -67,7 +74,34 @@ def get_settings() -> Settings:
     )
 
 
+def _llm_provider_name() -> str:
+    return os.environ.get("DEVMIND_LLM_PROVIDER", "").strip().lower()
+
+
+def _llm_model() -> str:
+    if _llm_provider_name() == "openrouter" or os.environ.get("OPENROUTER_API_KEY"):
+        return (
+            os.environ.get("DEVMIND_LLM_MODEL")
+            or os.environ.get("OPENROUTER_MODEL")
+            or "openrouter/free"
+        )
+    explicit = (
+        os.environ.get("DEVMIND_LLM_MODEL")
+        or os.environ.get("OPENAI_MODEL")
+        or os.environ.get("GROQ_MODEL")
+        or ""
+    )
+    if explicit:
+        return explicit
+    if _llm_base_url():
+        return "gpt-4o-mini"
+    return ""
+
+
 def _llm_base_url() -> str:
+    provider = _llm_provider_name()
+    if provider == "openrouter" or os.environ.get("OPENROUTER_API_KEY"):
+        return "https://openrouter.ai/api/v1"
     explicit = (
         os.environ.get("DEVMIND_LLM_BASE_URL")
         or os.environ.get("OPENAI_BASE_URL")
@@ -75,8 +109,6 @@ def _llm_base_url() -> str:
     ).rstrip("/")
     if explicit:
         return explicit
-    if os.environ.get("OPENROUTER_API_KEY"):
-        return "https://openrouter.ai/api/v1"
     if os.environ.get("GROQ_API_KEY"):
         return "https://api.groq.com/openai/v1"
     if os.environ.get("OPENAI_API_KEY"):

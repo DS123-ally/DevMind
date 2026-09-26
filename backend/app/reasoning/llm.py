@@ -44,6 +44,7 @@ def _rewrite(settings: Settings, facts: BriefingFacts) -> dict | None:
     payload = {
         "model": settings.llm_model,
         "temperature": 0.1,
+        "max_tokens": 900,
         "messages": [
             {
                 "role": "system",
@@ -52,7 +53,8 @@ def _rewrite(settings: Settings, facts: BriefingFacts) -> dict | None:
                     "Use only the facts in the user message. "
                     "Do not invent a rationale, owner, or behavior. "
                     "If the facts do not explain why, leave why empty. "
-                    "Return JSON with keys headline, what, why. what and why are arrays of short sentences."
+                    "Reply with a JSON object only, keys headline, what, why. "
+                    "what and why are arrays of short sentences. No markdown."
                 ),
             },
             {
@@ -78,15 +80,42 @@ def _rewrite(settings: Settings, facts: BriefingFacts) -> dict | None:
     headers = {"Content-Type": "application/json"}
     if settings.llm_api_key:
         headers["Authorization"] = f"Bearer {settings.llm_api_key}"
-    response = httpx.post(
-        f"{settings.llm_base_url}/chat/completions",
-        json=payload,
-        headers=headers,
-        timeout=30.0,
-    )
-    response.raise_for_status()
-    content = response.json()["choices"][0]["message"]["content"]
+    if "openrouter.ai" in settings.llm_base_url:
+        headers["HTTP-Referer"] = "https://github.com/DS123-ally/DevMind"
+        headers["X-Title"] = "DevMind"
+    timeout = 90.0 if "openrouter.ai" in settings.llm_base_url else 30.0
+    response = _post_chat(settings.llm_base_url, payload, headers, timeout)
+    content = _message_text(response)
     return _parse_json(content)
+
+
+def _post_chat(base_url: str, payload: dict, headers: dict, timeout: float) -> httpx.Response:
+    url = f"{base_url}/chat/completions"
+    response = httpx.post(url, json={**payload, "response_format": {"type": "json_object"}}, headers=headers, timeout=timeout)
+    if response.status_code == 400:
+        logger.info("Model rejected JSON mode; retrying without response_format")
+        response = httpx.post(url, json=payload, headers=headers, timeout=timeout)
+    if response.status_code >= 400:
+        logger.warning("Language model HTTP %s: %s", response.status_code, response.text[:800])
+        response.raise_for_status()
+    return response
+
+
+def _message_text(response: httpx.Response) -> str:
+    message = response.json()["choices"][0]["message"]
+    content = message.get("content")
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, dict):
+                parts.append(str(part.get("text") or part.get("content") or ""))
+            else:
+                parts.append(str(part))
+        content = "".join(parts)
+    text = (content or "").strip()
+    if not text:
+        text = str(message.get("reasoning") or "").strip()
+    return text
 
 
 def _parse_json(content: str) -> dict | None:

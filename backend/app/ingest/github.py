@@ -28,6 +28,22 @@ def parse_github_url(url: str) -> tuple[str, str]:
     return match.group("owner"), match.group("repo").removesuffix(".git")
 
 
+def github_url_from_git(root: Path) -> str | None:
+    completed = subprocess.run(
+        ["git", "-C", str(root), "remote", "get-url", "origin"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if completed.returncode != 0:
+        return None
+    try:
+        owner, name = parse_github_url(completed.stdout.strip())
+    except GitHubError:
+        return None
+    return f"https://github.com/{owner}/{name}"
+
+
 def clone_or_update(url: str, cache_dir: Path, token: str = "") -> Path:
     owner, name = parse_github_url(url)
     target = cache_dir / "repos" / f"{owner}__{name}"
@@ -71,11 +87,57 @@ def fetch_github_memory(
         repo = _get(client, f"https://api.github.com/repos/{owner}/{name}")
         issues = _pages(client, f"https://api.github.com/repos/{owner}/{name}/issues?state=all&per_page=50")
         pulls = _pages(client, f"https://api.github.com/repos/{owner}/{name}/pulls?state=all&per_page=50")
+        topics = _topics(client, owner, name)
+        _apply_repo_metadata(doc, repo, owner, name, topics)
+        issue_ids = _ingest_issues(doc, issues, files_by_path, symbols_by_name, developers)
+        _ingest_pulls(doc, client, owner, name, pulls, issue_ids, files_by_path, symbols_by_name, developers)
+
+
+def _topics(client: httpx.Client, owner: str, name: str) -> list[str]:
+    try:
+        payload = _get(client, f"https://api.github.com/repos/{owner}/{name}/topics")
+    except GitHubError:
+        return []
+    names = payload.get("names") if isinstance(payload, dict) else None
+    if isinstance(names, list):
+        return [str(item) for item in names if item]
+    return []
+
+
+def _apply_repo_metadata(doc: IngestDocument, repo: dict, owner: str, name: str, topics: list[str]) -> None:
+    license_info = repo.get("license") or {}
+    license_name = license_info.get("spdx_id") if isinstance(license_info, dict) else None
     doc.github_url = repo.get("html_url") or f"https://github.com/{owner}/{name}"
     doc.default_branch = repo.get("default_branch") or "main"
     if not doc.summary and repo.get("description"):
         doc.summary = str(repo["description"])[:600]
+    doc.github = {
+        "url": doc.github_url,
+        "owner": owner,
+        "name": name,
+        "fullName": repo.get("full_name") or f"{owner}/{name}",
+        "visibility": repo.get("visibility") or ("private" if repo.get("private") else "public"),
+        "stars": int(repo.get("stargazers_count") or 0),
+        "forks": int(repo.get("forks_count") or 0),
+        "watchers": int(repo.get("subscribers_count") or repo.get("watchers_count") or 0),
+        "openIssues": int(repo.get("open_issues_count") or 0),
+        "language": repo.get("language"),
+        "license": license_name,
+        "topics": topics or list(repo.get("topics") or []),
+        "homepage": repo.get("homepage") or None,
+        "pushedAt": repo.get("pushed_at"),
+        "archived": bool(repo.get("archived")),
+        "defaultBranch": doc.default_branch,
+    }
 
+
+def _ingest_issues(
+    doc: IngestDocument,
+    issues: list[dict],
+    files_by_path: dict[str, str],
+    symbols_by_name: dict[str, list[tuple[str, str]]],
+    developers: dict[str, DeveloperRec],
+) -> dict[str, str]:
     issue_ids: dict[str, str] = {item.key: item.id for item in doc.issues}
     for item in issues:
         if item.get("pull_request"):
@@ -92,6 +154,8 @@ def fetch_github_memory(
         login = ((item.get("user") or {}).get("login")) or ""
         if login:
             _dev(developers, doc.repo_id, login, None)
+        labels = [str(label.get("name")) for label in item.get("labels") or [] if isinstance(label, dict) and label.get("name")]
+        assignees = [str(user.get("login")) for user in item.get("assignees") or [] if isinstance(user, dict) and user.get("login")]
         doc.issues.append(
             IssueRec(
                 id=issue_id,
@@ -103,10 +167,27 @@ def fetch_github_memory(
                 about_ids=resolve_targets(_paths_in(body), files_by_path, symbols_by_name),
                 caused_error_ids=error_ids,
                 url=str(item.get("html_url") or "") or None,
+                labels=labels,
+                assignees=assignees,
+                comments=int(item.get("comments") or 0),
+                closed_at=str(item.get("closed_at") or "") or None,
             )
         )
+    return issue_ids
 
-    for item in pulls:
+
+def _ingest_pulls(
+    doc: IngestDocument,
+    client: httpx.Client,
+    owner: str,
+    name: str,
+    pulls: list[dict],
+    issue_ids: dict[str, str],
+    files_by_path: dict[str, str],
+    symbols_by_name: dict[str, list[tuple[str, str]]],
+    developers: dict[str, DeveloperRec],
+) -> None:
+    for index, item in enumerate(pulls):
         number = item.get("number")
         title = str(item.get("title") or "").strip()
         if not isinstance(number, int) or not title:
@@ -119,30 +200,34 @@ def fetch_github_memory(
             target = issue_ids.get(match.group(1))
             if target:
                 closes.append(target)
-        files = _pr_files(token, owner, name, number)
+        files = _pr_files(client, owner, name, number) if index < 20 else []
+        labels = [str(label.get("name")) for label in item.get("labels") or [] if isinstance(label, dict) and label.get("name")]
+        merged_at = item.get("merged_at")
         doc.pull_requests.append(
             PullRequestRec(
                 id=node_id(doc.repo_id, "pullrequest", str(number)),
                 number=number,
                 title=title,
-                status=str(item.get("state") or "open"),
+                status="merged" if merged_at else str(item.get("state") or "open"),
                 source="github",
                 url=str(item.get("html_url") or "") or None,
                 author_id=author_id,
                 file_ids=resolve_targets(files, files_by_path, symbols_by_name),
                 closes_issue_ids=closes,
                 body=body[:4000],
+                merged=bool(merged_at),
+                draft=bool(item.get("draft")),
+                base=((item.get("base") or {}).get("ref")),
+                head=((item.get("head") or {}).get("ref")),
+                merged_at=str(merged_at) if merged_at else None,
+                labels=labels,
             )
         )
 
 
-def _pr_files(token: str, owner: str, name: str, number: int) -> list[str]:
-    headers = {"Accept": "application/vnd.github+json", "User-Agent": "DevMind"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+def _pr_files(client: httpx.Client, owner: str, name: str, number: int) -> list[str]:
     try:
-        with httpx.Client(timeout=30.0, headers=headers) as client:
-            rows = _get(client, f"https://api.github.com/repos/{owner}/{name}/pulls/{number}/files")
+        rows = _get(client, f"https://api.github.com/repos/{owner}/{name}/pulls/{number}/files")
     except GitHubError:
         return []
     if not isinstance(rows, list):

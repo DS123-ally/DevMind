@@ -8,7 +8,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.graph.store import GraphStore
-from app.ingest.pipeline import scan
+from app.ingest.neo4j_ingest import ingest_to_neo4j
 
 
 def main() -> None:
@@ -21,8 +21,7 @@ def main() -> None:
     store.verify()
     store.ensure_schema()
     try:
-        document = scan(Path(args.path), args.name)
-        print(json.dumps(store.apply(document), indent=2))
+        print(json.dumps(ingest_to_neo4j(store, Path(args.path), args.name), indent=2))
     finally:
         store.close()
 

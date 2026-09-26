@@ -711,7 +711,13 @@ def _write_structure(tx, doc: IngestDocument, file_rows: list[dict], class_rows:
         """
         MERGE (r:Repository {id: $repoId})
         SET r.name = $name, r.path = $path, r.summary = $summary, r.repoId = $repoId, r.updatedAt = $now,
-            r.githubUrl = $githubUrl, r.defaultBranch = $defaultBranch, r.languagesJson = $languagesJson
+            r.githubUrl = $githubUrl, r.defaultBranch = $defaultBranch, r.languagesJson = $languagesJson,
+            r.githubOwner = $githubOwner, r.githubName = $githubName, r.githubFullName = $githubFullName,
+            r.githubStars = $githubStars, r.githubForks = $githubForks, r.githubWatchers = $githubWatchers,
+            r.githubOpenIssues = $githubOpenIssues, r.githubLanguage = $githubLanguage,
+            r.githubLicense = $githubLicense, r.githubTopicsJson = $githubTopicsJson,
+            r.githubVisibility = $githubVisibility, r.githubHomepage = $githubHomepage,
+            r.githubPushedAt = $githubPushedAt, r.githubArchived = $githubArchived
         """,
         repoId=repo_id,
         name=doc.name,
@@ -721,6 +727,20 @@ def _write_structure(tx, doc: IngestDocument, file_rows: list[dict], class_rows:
         githubUrl=doc.github_url,
         defaultBranch=doc.default_branch,
         languagesJson=json.dumps(doc.languages),
+        githubOwner=(doc.github or {}).get("owner"),
+        githubName=(doc.github or {}).get("name"),
+        githubFullName=(doc.github or {}).get("fullName"),
+        githubStars=(doc.github or {}).get("stars"),
+        githubForks=(doc.github or {}).get("forks"),
+        githubWatchers=(doc.github or {}).get("watchers"),
+        githubOpenIssues=(doc.github or {}).get("openIssues"),
+        githubLanguage=(doc.github or {}).get("language"),
+        githubLicense=(doc.github or {}).get("license"),
+        githubTopicsJson=json.dumps((doc.github or {}).get("topics") or []),
+        githubVisibility=(doc.github or {}).get("visibility"),
+        githubHomepage=(doc.github or {}).get("homepage"),
+        githubPushedAt=(doc.github or {}).get("pushedAt"),
+        githubArchived=(doc.github or {}).get("archived"),
     )
     tx.run(
         """
@@ -1055,7 +1075,9 @@ def _write_memory(tx, doc: IngestDocument) -> None:
             """
             MERGE (i:Issue {id: $id})
             SET i.repoId = $repoId, i.key = $key, i.title = $title, i.status = $status,
-                i.description = $description, i.source = $source
+                i.description = $description, i.source = $source, i.url = $url,
+                i.labelsJson = $labelsJson, i.assigneesJson = $assigneesJson,
+                i.comments = $comments, i.closedAt = $closedAt
             WITH i
             OPTIONAL MATCH (i)-[r:AFFECTS]->()
             DELETE r
@@ -1067,6 +1089,11 @@ def _write_memory(tx, doc: IngestDocument) -> None:
             status=issue.status,
             description=issue.description,
             source=issue.source,
+            url=issue.url,
+            labelsJson=json.dumps(issue.labels),
+            assigneesJson=json.dumps(issue.assignees),
+            comments=issue.comments,
+            closedAt=issue.closed_at,
         )
         _link_about(tx, "Issue", issue.id, repo_id, issue.about_ids, "AFFECTS")
         tx.run(
@@ -1153,7 +1180,9 @@ def _write_memory(tx, doc: IngestDocument) -> None:
             """
             MERGE (pr:PullRequest {id: $id})
             SET pr.repoId = $repoId, pr.number = $number, pr.title = $title, pr.status = $status,
-                pr.url = $url, pr.source = $source
+                pr.url = $url, pr.source = $source, pr.body = $body, pr.merged = $merged,
+                pr.draft = $draft, pr.base = $base, pr.head = $head, pr.mergedAt = $mergedAt,
+                pr.labelsJson = $labelsJson
             WITH pr
             OPTIONAL MATCH (pr)-[r:CHANGES|AUTHORED_BY|CLOSES]->()
             DELETE r
@@ -1165,6 +1194,13 @@ def _write_memory(tx, doc: IngestDocument) -> None:
             status=pull.status,
             url=pull.url,
             source=pull.source,
+            body=pull.body,
+            merged=pull.merged,
+            draft=pull.draft,
+            base=pull.base,
+            head=pull.head,
+            mergedAt=pull.merged_at,
+            labelsJson=json.dumps(pull.labels),
         )
         if pull.file_ids:
             tx.run(

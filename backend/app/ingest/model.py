@@ -81,6 +81,10 @@ class IssueRec:
     about_ids: list[str] = field(default_factory=list)
     caused_error_ids: list[str] = field(default_factory=list)
     url: str | None = None
+    labels: list[str] = field(default_factory=list)
+    assignees: list[str] = field(default_factory=list)
+    comments: int = 0
+    closed_at: str | None = None
 
 
 @dataclass
@@ -115,6 +119,12 @@ class PullRequestRec:
     file_ids: list[str] = field(default_factory=list)
     closes_issue_ids: list[str] = field(default_factory=list)
     body: str = ""
+    merged: bool = False
+    draft: bool = False
+    base: str | None = None
+    head: str | None = None
+    merged_at: str | None = None
+    labels: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -148,3 +158,4 @@ class IngestDocument:
     github_url: str | None = None
     default_branch: str | None = None
     languages: dict[str, int] = field(default_factory=dict)
+    github: dict[str, object] | None = None

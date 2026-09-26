@@ -74,12 +74,17 @@ def language_for(path: str) -> str:
 
 
 def parse_source(path: str, source: str) -> ParsedModule:
+    from app.ingest.treesitter import parse_with_tree_sitter
+
+    parsed = parse_with_tree_sitter(path, source)
+    if parsed is not None and (parsed.functions or parsed.classes or parsed.imports):
+        return parsed
     suffix = "." + path.rsplit(".", 1)[-1].lower() if "." in path else ""
     if suffix == ".py":
         return parse_python(source)
     if suffix in {".js", ".jsx", ".ts", ".tsx"}:
         return parse_javascript(source)
-    return ParsedModule(docstring=None, imports=[], classes=[], functions=[])
+    return parsed or ParsedModule(docstring=None, imports=[], classes=[], functions=[])
 
 
 def parse_python(source: str) -> ParsedModule:

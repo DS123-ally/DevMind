@@ -228,6 +228,19 @@ export function App() {
                 </div>
               ))}
             </dl>
+            {project.github?.url && (
+              <div className="github-meta">
+                <a href={project.github.url} target="_blank" rel="noreferrer">
+                  {project.github.fullName || project.github.url}
+                </a>
+                <p>
+                  {project.github.visibility ?? "public"}
+                  {project.github.stars != null ? ` · ${project.github.stars} stars` : ""}
+                  {project.github.language ? ` · ${project.github.language}` : ""}
+                  {project.github.license ? ` · ${project.github.license}` : ""}
+                </p>
+              </div>
+            )}
           </aside>
 
           <main className="stage">
