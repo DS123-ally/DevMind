@@ -1,0 +1,16 @@
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+.env
+node_modules/
+dist/
+.DS_Store
+neo4j-data/
+frontend/dist/
+.idea/
+.vscode/
+*.log

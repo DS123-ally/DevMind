@@ -1,0 +1,140 @@
+:root {
+  color-scheme: dark;
+  --bg: #12110f;
+  --raised: #1c1915;
+  --sunken: #0e0d0b;
+  --line: #3a342c;
+  --ink: #f3eee6;
+  --muted: #a89c8d;
+  --copper: #e0a15a;
+  --sage: #8fbfa8;
+  --clay: #d8c3a2;
+  --danger: #e08a74;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.92em; }
+
+.app { min-height: 100vh; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--line);
+  background: var(--sunken);
+}
+.brand { display: flex; gap: 12px; align-items: center; min-width: 180px; }
+.brand strong { font-family: Fraunces, Georgia, serif; font-size: 1.45rem; font-weight: 560; letter-spacing: -0.03em; }
+.brand em { display: block; color: var(--muted); font-style: normal; font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.mark {
+  width: 18px; height: 18px; border: 1.5px solid var(--copper); transform: rotate(45deg);
+  box-shadow: inset 0 0 0 4px var(--bg), inset 0 0 0 5px var(--copper);
+}
+.tagline { margin: 0; color: var(--clay); flex: 1; }
+.status { display: flex; gap: 14px; color: var(--muted); font-family: "IBM Plex Mono", monospace; font-size: 0.78rem; }
+.status .ok { color: var(--sage); }
+.status .down { color: var(--danger); }
+
+.banner { padding: 10px 22px; background: #2a2118; color: var(--clay); border-bottom: 1px solid var(--line); }
+.banner p { margin: 4px 0; }
+.banner .error { color: var(--danger); }
+
+.shell {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 320px;
+  min-height: calc(100vh - 74px);
+}
+.panel { padding: 18px; border-right: 1px solid var(--line); }
+.evidence { border-right: 0; border-left: 1px solid var(--line); background: #171512; }
+.side, .evidence { background: var(--raised); }
+h2, h3, h4 { font-family: Fraunces, Georgia, serif; font-weight: 560; letter-spacing: -0.02em; }
+h2 { margin: 0 0 12px; font-size: 1.15rem; }
+h3 { margin: 16px 0 8px; font-size: 1rem; color: var(--clay); }
+h4 { margin: 0 0 8px; color: var(--copper); font-size: 1rem; }
+.muted { color: var(--muted); line-height: 1.45; }
+.stack, .actions { display: grid; gap: 8px; }
+.actions { margin: 10px 0; }
+label { display: grid; gap: 6px; color: var(--muted); font-size: 0.85rem; }
+input, textarea {
+  width: 100%;
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+}
+button {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: left;
+}
+button:hover:not(:disabled) { border-color: var(--copper); }
+button:disabled { opacity: 0.55; cursor: wait; }
+.composer button, .stack button, .actions button { text-align: center; background: #2a241c; }
+.project-list { display: grid; gap: 6px; }
+.project-list button.active, .history button.active, .modes label.active {
+  border-color: var(--copper);
+  background: #2c2418;
+}
+.project-list span, .project-list strong { display: block; }
+.project-list span { color: var(--muted); font-size: 0.78rem; }
+
+.inventory { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; margin: 0; }
+.inventory div { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.inventory dt { color: var(--muted); }
+.inventory dd { margin: 0; font-family: "IBM Plex Mono", monospace; }
+.rels { list-style: none; padding: 0; margin: 0; }
+.rels li, .trail li { display: flex; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 0.86rem; }
+.tree { font-family: "IBM Plex Mono", monospace; font-size: 0.78rem; color: var(--clay); max-height: 280px; overflow: auto; }
+.tree ul { list-style: none; margin: 0; padding: 0; }
+.tree .dir { color: var(--ink); }
+.tree .file { color: var(--muted); }
+
+.briefings { background:
+  radial-gradient(900px 240px at 20% -10%, rgba(224, 161, 90, 0.08), transparent 50%),
+  var(--bg);
+}
+.composer { display: grid; gap: 10px; margin-bottom: 18px; }
+.composer-head, .composer-foot { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.composer-foot p { margin: 0; color: var(--muted); font-size: 0.85rem; }
+.modes { display: flex; gap: 6px; }
+.modes label { display: flex; gap: 6px; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; }
+.modes input { width: auto; accent-color: var(--copper); }
+
+.briefing { background: var(--raised); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
+.briefing header { display: flex; justify-content: space-between; color: var(--muted); font-size: 0.8rem; }
+.question { color: var(--clay); margin: 10px 0 4px; }
+.briefing h3 { font-size: 1.7rem; line-height: 1.15; margin: 0 0 14px; }
+.columns { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.columns ul, .history ul { margin: 0; padding-left: 18px; }
+.columns li { margin: 0 0 8px; line-height: 1.45; }
+.gaps { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); color: var(--copper); }
+.gaps p { margin: 0 0 6px; }
+.stamp { border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.68rem; }
+.stamp.why { color: var(--sage); border-color: var(--sage); }
+.stamp.what { color: var(--clay); border-color: var(--clay); }
+.stamp.both, .stamp.auto { color: var(--copper); border-color: var(--copper); }
+.history { margin-top: 22px; }
+.history ul { list-style: none; padding: 0; display: grid; gap: 6px; }
+.history button { display: flex; gap: 8px; align-items: center; width: 100%; }
+.empty { padding: 28px 8px; max-width: 62ch; }
+.empty h3 { font-family: Fraunces, Georgia, serif; font-size: 2rem; margin-bottom: 8px; }
+.trail { list-style: none; padding: 0; margin: 0; }
+.trail li { display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; }
+.trail em { color: var(--copper); font-style: normal; font-family: "IBM Plex Mono", monospace; font-size: 0.72rem; letter-spacing: 0.04em; }
+.voice { color: var(--muted); font-size: 0.78rem; }
+
+@media (max-width: 1100px) {
+  .shell { grid-template-columns: 1fr; }
+  .panel { border: 0; border-bottom: 1px solid var(--line); }
+  .columns, .topbar, .composer-head, .composer-foot { display: grid; }
+}

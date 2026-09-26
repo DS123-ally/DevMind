@@ -1,0 +1,36 @@
+{
+  "issues": [
+    {
+      "key": "BILL-14",
+      "title": "Stripe webhook retries double-apply payments",
+      "status": "resolved",
+      "description": "invoice.paid deliveries are at-least-once. apply_payment inserted a second payment and raised IntegrityError.",
+      "affects": ["app/webhooks.py", "apply_payment"]
+    }
+  ],
+  "errors": [
+    {
+      "key": "duplicate-payment",
+      "type": "IntegrityError",
+      "message": "payment already recorded for invoice",
+      "occursIn": ["app/webhooks.py", "apply_payment"]
+    }
+  ],
+  "solutions": [
+    {
+      "key": "idempotent-payment",
+      "summary": "Record a stable payment key and ignore duplicate invoice.paid events.",
+      "resolves": ["BILL-14", "duplicate-payment"]
+    }
+  ],
+  "pullRequests": [
+    {
+      "number": 38,
+      "title": "Make Stripe payment application idempotent",
+      "status": "merged",
+      "author": "Lena Ortiz",
+      "authorEmail": "lena@example.com",
+      "changes": ["app/webhooks.py", "app/store.py"]
+    }
+  ]
+}

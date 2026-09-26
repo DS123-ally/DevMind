@@ -1,0 +1,18 @@
+{
+  "issues": [
+    {
+      "key": "DM-1",
+      "title": "Answers drifted away from the repository",
+      "status": "resolved",
+      "description": "A chat transcript can recall that a question was asked. It cannot recall which function a decision constrains.",
+      "affects": ["backend/app/reasoning/engine.py"]
+    }
+  ],
+  "solutions": [
+    {
+      "key": "graph-briefing",
+      "summary": "Retrieve a bounded subgraph, narrate only those facts, and write the briefing back as a Conversation.",
+      "resolves": ["DM-1"]
+    }
+  ]
+}
