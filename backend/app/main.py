@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from neo4j.exceptions import Neo4jError
 
 from app.api.routes import create_app
@@ -63,20 +65,18 @@ async def lifespan(application: FastAPI):
 
 
 def build_app() -> FastAPI:
+    settings = get_settings()
     application = create_app(lifespan=lifespan)
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://127.0.0.1:5173",
-            "http://localhost:5173",
-            "http://127.0.0.1:5174",
-            "http://localhost:5174",
-            "http://127.0.0.1:3000",
-            "http://localhost:3000",
-        ],
+        allow_origins=list(settings.cors_origins),
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    ui = Path(settings.ui_dir)
+    if ui.is_dir() and (ui / "index.html").is_file():
+        application.mount("/", StaticFiles(directory=str(ui), html=True), name="ui")
+        logger.info("Serving UI from %s", ui)
     return application
 
 

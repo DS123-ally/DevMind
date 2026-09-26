@@ -19,7 +19,8 @@ def load_dotenv(path: Path) -> None:
             continue
         key, value = line.split("=", 1)
         key, value = key.strip(), value.strip().strip('"').strip("'")
-        os.environ[key] = value
+        if not os.environ.get(key):
+            os.environ[key] = value
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,8 @@ class Settings:
     cache_dir: str
     host: str
     port: int
+    cors_origins: tuple[str, ...]
+    ui_dir: str
 
     @property
     def llm_enabled(self) -> bool:
@@ -70,7 +73,9 @@ def get_settings() -> Settings:
         github_token=os.environ.get("GITHUB_TOKEN", ""),
         cache_dir=os.environ.get("DEVMIND_CACHE_DIR", str(REPO_ROOT / ".cache")),
         host=os.environ.get("DEVMIND_HOST", "127.0.0.1"),
-        port=int(os.environ.get("DEVMIND_PORT", "8000")),
+        port=int(os.environ.get("PORT") or os.environ.get("DEVMIND_PORT", "8000")),
+        cors_origins=_cors_origins(),
+        ui_dir=os.environ.get("DEVMIND_UI_DIR") or str(REPO_ROOT / "frontend" / "dist"),
     )
 
 
@@ -114,3 +119,28 @@ def _llm_base_url() -> str:
     if os.environ.get("OPENAI_API_KEY"):
         return "https://api.openai.com/v1"
     return ""
+
+
+def _cors_origins() -> tuple[str, ...]:
+    defaults = (
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
+        "http://127.0.0.1:3000",
+        "http://localhost:3000",
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+    )
+    extra = tuple(
+        origin.strip().rstrip("/")
+        for origin in os.environ.get("DEVMIND_CORS_ORIGINS", "").split(",")
+        if origin.strip()
+    )
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for origin in defaults + extra:
+        if origin not in seen:
+            seen.add(origin)
+            ordered.append(origin)
+    return tuple(ordered)

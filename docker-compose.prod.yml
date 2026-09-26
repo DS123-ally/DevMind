@@ -1,0 +1,19 @@
+# One container: Vite UI + FastAPI. Uses Neo4j Aura / OpenRouter from .env.
+# docker compose -f docker-compose.prod.yml up --build
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DEVMIND_HOST: "0.0.0.0"
+      DEVMIND_CACHE_DIR: /data/cache
+      DEVMIND_UI_DIR: /app/frontend/dist
+    volumes:
+      - app-cache:/data/cache
+    restart: unless-stopped
+
+volumes:
+  app-cache:

@@ -76,6 +76,30 @@ npm run dev
 
 Open `http://127.0.0.1:3000`.
 
+## Deploy
+
+One Docker image serves the UI and `/api` on the same origin. Point it at **Neo4j Aura** and **OpenRouter** with the same keys you use locally (never put `.env` in git).
+
+### Local production image
+
+```bash
+docker compose -f docker-compose.prod.yml up --build
+```
+
+Open `http://127.0.0.1:8000`. GitHub clones are stored in a Docker volume.
+
+### Render
+
+1. Push this repo to GitHub.
+2. New Web Service → this repository → Docker.
+3. Or Blueprint: `render.yaml`.
+4. Set `NEO4J_URI`, `NEO4J_PASSWORD`, `OPENROUTER_API_KEY`.
+5. After the first deploy, set `DEVMIND_CORS_ORIGINS` to your Render URL if the UI is ever hosted separately. Same-origin Docker does not need it.
+
+Railway, Fly, and any other Docker host work the same way. They inject `PORT`; the image already binds `0.0.0.0:$PORT`.
+
+Ask timeouts can exceed 30s (free models). Raise the platform request timeout if Ask is cut off.
+
 Copy `.env.example` to `.env` to point at Neo4j Aura (`neo4j+s://…`) or a local instance that is not `bolt://localhost:7687`. Aura credentials use `NEO4J_USERNAME`. The password stays in `.env`; that file is gitignored.
 
 Optional wording model, any OpenAI-compatible endpoint:
