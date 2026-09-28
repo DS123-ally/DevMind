@@ -13,6 +13,16 @@ If the graph has no recorded reason, the briefing says so. The model does not in
 
 ---
 
+# ScreenShots
+
+<img width="1917" height="912" alt="Screenshot 2026-09-28 202341" src="https://github.com/user-attachments/assets/628476ba-4c67-4aaa-abbb-1e9e38655be6" />
+
+
+<img width="1917" height="910" alt="Screenshot 2026-09-28 202349" src="https://github.com/user-attachments/assets/c83ae838-fb5f-459e-b542-630dddf0b2b5" />
+
+
+
+
 ## How it works
 
 1. **Ingest** a GitHub URL, a local folder, a zip, or the bundled billing sample.
