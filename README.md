@@ -29,15 +29,19 @@ Re-ingesting a repository rebuilds the code structure and refreshes ADR and `.de
 
 ## How a briefing is produced
 
-1. Intent detection (callers, technologies, bug history, how-fixed, why-technology, overview).
-2. Neo4j retrieval of a bounded subgraph — not a chat log.
-3. Code neighborhood (files, functions, imports, calls).
-4. Context builder from those relationships.
-5. Optional LLM rephrase, grounded in graph facts.
-6. Citations, WHY path (`Technology → Decision → Issue → Solution → PR`).
-7. Conversation stored in Neo4j. Phrases like “remember that we decided…” extract a Decision node.
+1. **Intent classification** — callers, technologies, bugs, how-fixed, why-technology, overview.
+2. **Graph retrieval** — bounded Neo4j subgraph (not a chat log).
+3. **Code retrieval** — source windows around the matched symbols.
+4. **LLM response** — optional rephrase, grounded in graph facts and those windows.
+5. **Memory extraction** — explicit decisions, issues, and solutions from the question (nothing invented).
+6. **Neo4j updates** — Conversation stored; extracted Decision / Issue / Solution nodes linked to the subgraph.
+7. Citations and the WHY path (`Technology → Decision → Issue → Solution → PR`).
+
+Say `remember that we decided … because …`, `issue BILL-14: …`, or `we resolved BILL-14 by …` to write those nodes.
 
 Open `http://127.0.0.1:5173` (Vite) or `http://127.0.0.1:3000` (Next.js + React Flow). Connect a GitHub repo with the GitHub URL field (`GITHUB_TOKEN` in `.env` for private repos). Zip upload: `POST /api/ingest/upload`.
+
+Jira Cloud tickets: set `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, and `JIRA_PROJECT` in `.env`, then ingest the matching repository. Tickets become Issue nodes (and Solution nodes when the ticket is Done). Do not put a Jira token in `GITHUB_TOKEN`.
 
 ## Run it
 

@@ -138,9 +138,10 @@ class GraphStore:
            OR toLower(coalesce(n.description, '')) CONTAINS token
            OR toLower(coalesce(n.signature, '')) CONTAINS token
            OR toLower(coalesce(n.key, '')) CONTAINS token
+        WITH n, count(token) AS score
         RETURN n.id AS id, labels(n) AS labels,
                coalesce(n.name, n.title, n.key, n.path, '') AS name,
-               count(token) AS score
+               score
         LIMIT 20
         """
         with self.driver.session(database=self.database) as session:
@@ -479,6 +480,61 @@ class GraphStore:
             raise LookupError("Repository not found")
         return dict(record)
 
+    def add_solution(
+        self,
+        repo_id: str,
+        summary: str,
+        issue_key: str | None,
+        about_ids: list[str],
+    ) -> dict:
+        key = _slug(summary) or uuid.uuid4().hex[:8]
+        solution_id = node_id(repo_id, "solution", key)
+        query = """
+        MATCH (r:Repository {id: $repoId})
+        MERGE (s:Solution {id: $id})
+        SET s.repoId = $repoId, s.key = $key, s.summary = $summary, s.source = 'user'
+        WITH s
+        OPTIONAL MATCH (i:Issue {repoId: $repoId})
+        WHERE $issueKey <> '' AND toUpper(i.key) = toUpper($issueKey)
+        FOREACH (issue IN CASE WHEN i IS NULL THEN [] ELSE [i] END |
+          MERGE (s)-[:RESOLVES]->(issue)
+        )
+        WITH s
+        OPTIONAL MATCH (i:Issue {repoId: $repoId})
+        WHERE $issueKey <> '' AND toUpper(i.key) = toUpper($issueKey)
+        FOREACH (issue IN CASE WHEN i IS NULL THEN [] ELSE [i] END |
+          MERGE (s)-[:RESOLVES]->(issue)
+        )
+        RETURN s.id AS id, s.key AS key, s.summary AS summary
+        """
+        with self.driver.session(database=self.database) as session:
+            record = session.run(
+                query,
+                repoId=repo_id,
+                id=solution_id,
+                key=key,
+                summary=summary,
+                issueKey=issue_key or "",
+                aboutIds=about_ids,
+            ).single()
+        if record is None:
+            raise LookupError("Repository not found")
+        return dict(record)
+
+    def recent_conversations(self, repo_id: str, limit: int = 5) -> list[dict]:
+        query = """
+        MATCH (c:Conversation {repoId: $repoId})
+        RETURN c.question AS question, c.headline AS headline, c.createdAt AS createdAt
+        ORDER BY c.createdAt DESC
+        LIMIT $limit
+        """
+        with self.driver.session(database=self.database) as session:
+            rows = [dict(row) for row in session.run(query, repoId=repo_id, limit=limit)]
+        for row in rows:
+            if row.get("createdAt") is not None:
+                row["createdAt"] = str(row["createdAt"])
+        return rows
+
     def save_briefing(self, repo_id: str, briefing: dict, about_ids: list[str]) -> str:
         conversation_id = str(uuid.uuid4())
         user_id = str(uuid.uuid4())
@@ -549,7 +605,7 @@ class GraphStore:
                     "gaps": _load_json(row.get("gapsJson"), []),
                     "evidence": _load_json(row.get("evidenceJson"), []),
                     "voice": row.get("voice") or "graph",
-                    "createdAt": row.get("createdAt"),
+                    "createdAt": str(row.get("createdAt") or ""),
                 }
             )
         return briefings

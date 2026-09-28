@@ -23,5 +23,13 @@ services:
         sync: false
       - key: GITHUB_TOKEN
         sync: false
+      - key: JIRA_BASE_URL
+        sync: false
+      - key: JIRA_EMAIL
+        sync: false
+      - key: JIRA_API_TOKEN
+        sync: false
+      - key: JIRA_PROJECT
+        sync: false
       - key: DEVMIND_CORS_ORIGINS
         sync: false

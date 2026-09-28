@@ -6,8 +6,9 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from neo4j.exceptions import Neo4jError
 
@@ -73,6 +74,13 @@ def build_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @application.exception_handler(Exception)
+    async def unhandled(_request, exc: Exception):
+        logger.exception("Unhandled error")
+        if isinstance(exc, HTTPException):
+            raise exc
+        return JSONResponse(status_code=500, content={"detail": str(exc)[:800]})
     ui = Path(settings.ui_dir)
     if ui.is_dir() and (ui / "index.html").is_file():
         application.mount("/", StaticFiles(directory=str(ui), html=True), name="ui")

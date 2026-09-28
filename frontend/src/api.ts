@@ -80,6 +80,7 @@ export type Health = {
   status: string;
   neo4j: string;
   llm: string;
+  jira?: string;
   error?: string | null;
 };
 

@@ -71,6 +71,7 @@ def _rewrite(settings: Settings, facts: BriefingFacts) -> dict | None:
                         "issues": [issue.__dict__ for issue in facts.issues],
                         "errors": [error.__dict__ for error in facts.errors],
                         "pullRequests": [pull.__dict__ for pull in facts.pull_requests],
+                        "snippets": facts.snippets[:8],
                     },
                     default=str,
                 ),

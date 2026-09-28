@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from neo4j.exceptions import Neo4jError
@@ -17,6 +19,8 @@ from app.ingest.github import GitHubError, clone_or_update, parse_github_url
 from app.ingest.neo4j_ingest import ingest_to_neo4j
 from app.ingest.pipeline import IngestLimitError
 from app.reasoning.agent import ask, read_source
+
+logger = logging.getLogger("devmind.api")
 
 router = APIRouter(prefix="/api")
 
@@ -122,6 +126,9 @@ def health(request: Request) -> dict:
             f"{settings.llm_provider}:{settings.llm_model}" if settings.llm_enabled else "off"
         ),
         "github": "configured" if settings.github_token else "public-only",
+        "jira": (
+            f"configured:{settings.jira_project or 'no-project'}" if settings.jira_enabled else "off"
+        ),
         "error": request.app.state.neo4j_error,
     }
 
@@ -264,16 +271,21 @@ def project_file(project_id: str, path: str, request: Request) -> dict:
 
 
 @router.post("/projects/{project_id}/ask")
-def project_ask(project_id: str, body: AskIn, request: Request) -> dict:
+def project_ask(project_id: str, body: AskIn, request: Request) -> JSONResponse:
     if body.mode not in {None, "what", "why", "both"}:
         raise HTTPException(status_code=400, detail="Mode must be what, why, or both.")
     request.app.state.settings = get_settings()
     try:
-        return ask(_store(request), request.app.state.settings, project_id, body.question.strip(), body.mode)
+        briefing = ask(_store(request), request.app.state.settings, project_id, body.question.strip(), body.mode)
+        return JSONResponse(content=briefing)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Neo4jError as exc:
-        raise HTTPException(status_code=500, detail=str(exc.message) if getattr(exc, "message", None) else str(exc)) from exc
+        logger.exception("Ask Neo4j error")
+        raise HTTPException(status_code=500, detail=str(exc)[:800]) from exc
+    except Exception as exc:
+        logger.exception("Ask failed")
+        raise HTTPException(status_code=500, detail=str(exc)[:800]) from exc
 
 
 @router.post("/projects/{project_id}/decisions")

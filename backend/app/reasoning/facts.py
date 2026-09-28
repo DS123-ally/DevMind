@@ -102,5 +102,6 @@ class BriefingFacts:
     conversations: list[ConversationFact] = field(default_factory=list)
     developers: list[str] = field(default_factory=list)
     evidence: list[EvidenceFact] = field(default_factory=list)
+    snippets: list[dict] = field(default_factory=list)
     matched: bool = False
     anchor_ids: list[str] = field(default_factory=list)

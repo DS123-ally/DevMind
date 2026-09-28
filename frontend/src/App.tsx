@@ -145,6 +145,7 @@ export function App() {
         <div className="pills">
           <span className={neoOk ? "pill ok" : "pill bad"}>{neoOk ? "Neo4j connected" : `Neo4j ${health?.neo4j ?? "…"}`}</span>
           {health?.llm && health.llm !== "off" && <span className="pill">LLM {health.llm}</span>}
+          {health?.jira && health.jira !== "off" && <span className="pill">Jira {health.jira.replace("configured:", "")}</span>}
         </div>
       </header>
 

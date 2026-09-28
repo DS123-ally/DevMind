@@ -85,6 +85,8 @@ def corpus_tokens(facts: BriefingFacts) -> set[str]:
         parts.extend([str(pull.number), pull.title, pull.author or "", " ".join(pull.files)])
     for item in facts.evidence:
         parts.extend([item.source, item.target, item.note, item.relationship])
+    for snippet in facts.snippets:
+        parts.extend([str(snippet.get("path") or ""), str(snippet.get("name") or ""), str(snippet.get("text") or "")])
     return set(_WORD.findall(" ".join(parts).lower()))
 
 

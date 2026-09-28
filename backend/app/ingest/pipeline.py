@@ -141,6 +141,17 @@ def scan(
             fetch_github_memory(github_url, github_token, doc, files_by_path, symbols_by_name, developers)
         except Exception as exc:
             doc.warnings.append(f"GitHub metadata was not imported ({exc}).")
+    try:
+        from app.config import get_settings
+        from app.ingest.jira import fetch_jira_memory
+
+        jira_settings = get_settings()
+        if jira_settings.jira_enabled:
+            count = fetch_jira_memory(jira_settings, doc, files_by_path, symbols_by_name, developers)
+            if count:
+                doc.warnings.append(f"Imported {count} Jira tickets from {jira_settings.jira_project}.")
+    except Exception as exc:
+        doc.warnings.append(f"Jira tickets were not imported ({exc}).")
     _link_supersedes(doc)
     _link_decision_technologies(doc)
     readme = root / "README.md"

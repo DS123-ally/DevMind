@@ -38,6 +38,10 @@ class Settings:
     port: int
     cors_origins: tuple[str, ...]
     ui_dir: str
+    jira_base_url: str = ""
+    jira_email: str = ""
+    jira_api_token: str = ""
+    jira_project: str = ""
 
     @property
     def llm_enabled(self) -> bool:
@@ -54,6 +58,10 @@ class Settings:
         if self.llm_base_url:
             return "openai-compatible"
         return "off"
+
+    @property
+    def jira_enabled(self) -> bool:
+        return bool(self.jira_base_url and self.jira_email and self.jira_api_token)
 
 
 def get_settings() -> Settings:
@@ -76,6 +84,10 @@ def get_settings() -> Settings:
         port=int(os.environ.get("PORT") or os.environ.get("DEVMIND_PORT", "8000")),
         cors_origins=_cors_origins(),
         ui_dir=os.environ.get("DEVMIND_UI_DIR") or str(REPO_ROOT / "frontend" / "dist"),
+        jira_base_url=os.environ.get("JIRA_BASE_URL", "").rstrip("/"),
+        jira_email=os.environ.get("JIRA_EMAIL", ""),
+        jira_api_token=os.environ.get("JIRA_API_TOKEN", ""),
+        jira_project=os.environ.get("JIRA_PROJECT", ""),
     )
 
 
