@@ -20,5 +20,10 @@ def test_suggestions_use_functions_decisions_and_tickets():
     assert questions[2]["mode"] == "why"
 
 
+def test_function_parentheses_are_stripped():
+    questions = suggested_questions(["enGraphImage()"], [], [])
+    assert questions == [{"text": "What does enGraphImage do?", "mode": "what"}]
+
+
 def test_empty_graph_has_no_invented_questions():
     assert suggested_questions(["a", "run"], ["short"], ["not-a-ticket"]) == []

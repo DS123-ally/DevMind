@@ -30,7 +30,7 @@ def _function_names(names: list[str]) -> list[str]:
     seen: set[str] = set()
     kept: list[str] = []
     for raw in names:
-        name = (raw or "").strip()
+        name = re.sub(r"\(\)$", "", (raw or "").strip())
         key = name.lower()
         if not name or name.startswith("_") or key in _SKIP_FUNCTIONS or key in seen:
             continue

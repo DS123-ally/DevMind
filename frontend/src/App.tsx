@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Briefing, type Health, type ProjectDetail, type ProjectSummary, type TreeNode } from "./api";
 
 type Mode = "auto" | "what" | "why";
@@ -22,6 +22,7 @@ export function App() {
   const [decisionRationale, setDecisionRationale] = useState("");
   const [decider, setDecider] = useState("");
   const [connectOpen, setConnectOpen] = useState(false);
+  const projectIdRef = useRef<string | null>(null);
 
   const selected = useMemo(
     () => project?.briefings.find((item) => item.id === selectedId) ?? project?.briefings[0] ?? null,
@@ -37,6 +38,11 @@ export function App() {
     const next = selectId ?? listed.projects[0]?.id;
     if (next) {
       const detail = await api.project(next);
+      if (projectIdRef.current !== next) {
+        setQuestion("");
+        setMode("auto");
+      }
+      projectIdRef.current = next;
       setProject(detail);
       setSelectedId(detail.briefings[0]?.id ?? null);
       try {
@@ -45,8 +51,11 @@ export function App() {
         setTree(null);
       }
     } else {
+      projectIdRef.current = null;
       setProject(null);
       setTree(null);
+      setQuestion("");
+      setMode("auto");
     }
   }
 
@@ -255,10 +264,10 @@ export function App() {
                     placeholder={`Ask about ${project.name}…`}
                   />
                   {!question.trim() && (project.suggestions ?? []).length > 0 && (
-                    <div className="suggestions" aria-label="Suggested questions">
+                    <div key={project.id} className="suggestions" aria-label="Suggested questions">
                       {(project.suggestions ?? []).map((item) => (
                         <button
-                          key={item.text}
+                          key={`${project.id}:${item.text}`}
                           type="button"
                           disabled={busy}
                           onClick={() => {

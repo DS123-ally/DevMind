@@ -54,7 +54,10 @@ export default function Home() {
       setSuggestions([]);
       return;
     }
-    setProjectId(next);
+    setProjectId((current) => {
+      if (current !== next) setQuestion("");
+      return next;
+    });
     const detail = await json<{ briefings: Briefing[]; suggestions?: Suggestion[] }>(`/api/projects/${next}`);
     setBriefing(detail.briefings[0] ?? null);
     setSuggestions(detail.suggestions ?? []);
@@ -192,7 +195,7 @@ export default function Home() {
               {!question.trim() && suggestions.length > 0 && (
                 <div className="suggestions" aria-label="Suggested questions">
                   {suggestions.map((item) => (
-                    <button key={item.text} type="button" disabled={busy} onClick={() => setQuestion(item.text)}>
+                    <button key={`${projectId}:${item.text}`} type="button" disabled={busy} onClick={() => setQuestion(item.text)}>
                       {item.text}
                     </button>
                   ))}
