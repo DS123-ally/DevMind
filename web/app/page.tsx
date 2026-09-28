@@ -18,6 +18,7 @@ type Briefing = {
   citations?: { kind: string; name: string; path: string; line?: number | null }[];
 };
 type Graph = { nodes: { id: string; labels: string[]; name: string }[]; edges: { source: string; target: string; type: string }[] };
+type Suggestion = { text: string; mode: "what" | "why" };
 
 async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
@@ -34,6 +35,7 @@ export default function Home() {
   const [github, setGithub] = useState("");
   const [graph, setGraph] = useState<Graph | null>(null);
   const [code, setCode] = useState("");
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -49,11 +51,13 @@ export default function Home() {
       setProjectId(null);
       setBriefing(null);
       setGraph(null);
+      setSuggestions([]);
       return;
     }
     setProjectId(next);
-    const detail = await json<{ briefings: Briefing[] }>(`/api/projects/${next}`);
+    const detail = await json<{ briefings: Briefing[]; suggestions?: Suggestion[] }>(`/api/projects/${next}`);
     setBriefing(detail.briefings[0] ?? null);
+    setSuggestions(detail.suggestions ?? []);
     setGraph(await json<Graph>(`/api/projects/${next}/graph`));
   }, []);
 
@@ -185,6 +189,15 @@ export default function Home() {
             <form className="ask" onSubmit={ask}>
               <textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={2} placeholder={`Ask about ${project.name}…`} />
               <button className="primary" disabled={busy || !question.trim()}>{busy ? "Walking graph…" : "Ask"}</button>
+              {!question.trim() && suggestions.length > 0 && (
+                <div className="suggestions" aria-label="Suggested questions">
+                  {suggestions.map((item) => (
+                    <button key={item.text} type="button" disabled={busy} onClick={() => setQuestion(item.text)}>
+                      {item.text}
+                    </button>
+                  ))}
+                </div>
+              )}
             </form>
             {briefing ? (
               <article className="answer">

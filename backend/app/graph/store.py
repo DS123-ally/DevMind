@@ -20,6 +20,7 @@ QUERIES = named_queries()
 
 class GraphStore:
     def __init__(self, uri: str, user: str, password: str, database: str) -> None:
+        self.uri = uri
         self.database = database
         self.driver: Driver = GraphDatabase.driver(uri, auth=(user, password))
 
@@ -731,6 +732,21 @@ class GraphStore:
                 )
             ]
         return {"decisions": decisions, "issues": issues, "conversations": conversations}
+
+    def sample_functions(self, repo_id: str, limit: int = 8) -> list[str]:
+        query = """
+        MATCH (f:Function {repoId: $repoId})
+        WHERE f.name IS NOT NULL AND size(f.name) > 3 AND NOT f.name STARTS WITH '_'
+        OPTIONAL MATCH (caller:Function {repoId: $repoId})-[:CALLS]->(f)
+        WITH f.name AS name, count(caller) AS callers
+        ORDER BY callers DESC, size(name) DESC, name
+        WITH name, max(callers) AS callers
+        ORDER BY callers DESC, size(name) DESC, name
+        RETURN name
+        LIMIT $limit
+        """
+        with self.driver.session(database=self.database) as session:
+            return [row["name"] for row in session.run(query, repoId=repo_id, limit=limit) if row["name"]]
 
 
 def build_tree(name: str, directories: list[dict], files: list[dict]) -> dict:

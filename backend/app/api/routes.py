@@ -14,9 +14,10 @@ from neo4j.exceptions import Neo4jError
 
 from app.config import REPO_ROOT, get_settings
 from app.graph.crud import LABELS, RELS
-from app.graph.store import QUERIES, SCHEMA
+from app.graph.store import SCHEMA, GraphStore, QUERIES
 from app.ingest.github import GitHubError, clone_or_update, parse_github_url
 from app.ingest.neo4j_ingest import ingest_to_neo4j
+from app.reasoning.suggestions import suggested_questions
 from app.ingest.pipeline import IngestLimitError
 from app.reasoning.agent import ask, read_source
 
@@ -110,13 +111,29 @@ def health(request: Request) -> dict:
     request.app.state.settings = get_settings()
     settings = request.app.state.settings
     store = request.app.state.store
-    if store is not None and not request.app.state.neo4j_ok:
+    uri_changed = store is not None and getattr(store, "uri", None) != settings.neo4j_uri
+    if store is None or not request.app.state.neo4j_ok or uri_changed:
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+            request.app.state.store = None
         try:
+            store = GraphStore(
+                settings.neo4j_uri,
+                settings.neo4j_user,
+                settings.neo4j_password,
+                settings.neo4j_database,
+            )
             store.verify()
             store.ensure_schema()
+            request.app.state.store = store
             request.app.state.neo4j_ok = True
             request.app.state.neo4j_error = None
         except Exception as exc:
+            request.app.state.store = None
+            request.app.state.neo4j_ok = False
             request.app.state.neo4j_error = str(exc)
     connected = bool(request.app.state.neo4j_ok)
     return {
@@ -206,6 +223,7 @@ def project(project_id: str, request: Request) -> dict:
     if found is None:
         raise HTTPException(status_code=404, detail="Project not found.")
     repository = found["repository"]
+    memory = store.memory_panel(project_id)
     return {
         "id": project_id,
         "name": repository.get("name"),
@@ -237,7 +255,12 @@ def project(project_id: str, request: Request) -> dict:
         "decisions": found["decisions"],
         "inventory": store.inventory(project_id),
         "briefings": store.list_briefings(project_id),
-        "memory": store.memory_panel(project_id),
+        "memory": memory,
+        "suggestions": suggested_questions(
+            store.sample_functions(project_id),
+            [item.get("title") or "" for item in found["decisions"]],
+            _issue_keys(memory["issues"]),
+        ),
     }
 
 
@@ -301,6 +324,12 @@ def project_decision(project_id: str, body: DecisionIn, request: Request) -> dic
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Project not found.") from exc
+
+
+def _issue_keys(issues: list[dict]) -> list[str]:
+    jira = [item.get("key") or "" for item in issues if str(item.get("source") or "").lower() == "jira"]
+    other = [item.get("key") or "" for item in issues if str(item.get("source") or "").lower() != "jira"]
+    return jira + other
 
 
 @router.get("/schema")

@@ -61,6 +61,7 @@ export type ProjectDetail = {
   decisions: { id: string; title: string; status: string; date?: string }[];
   inventory: Inventory;
   briefings: Briefing[];
+  suggestions?: { text: string; mode: "what" | "why" }[];
   memory?: {
     decisions: { id: string; title: string; status: string; rationale: string; technologies: string[]; solutions: string[] }[];
     issues: { id: string; key: string; title: string; status: string; errors: string[]; solutions: string[]; pulls: number[] }[];

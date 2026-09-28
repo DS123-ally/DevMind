@@ -64,6 +64,12 @@ input, textarea, button {
   box-shadow: var(--shadow);
 }
 .ask textarea { border: 0; background: transparent; min-height: 64px; resize: vertical; font-weight: 600; }
+.suggestions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.suggestions button {
+  border: 2px solid var(--line); background: var(--lift); font-size: 12px; font-weight: 700;
+  padding: 6px 10px; text-align: left; line-height: 1.35; box-shadow: 2px 2px 0 var(--line);
+}
+.suggestions button:hover { background: var(--blue); color: #fff; }
 .answer { background: #fff; border: 3px solid var(--line); padding: 18px; box-shadow: var(--shadow); }
 .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .split section { border: 3px solid var(--line); padding: 12px; background: var(--lift); }

@@ -254,6 +254,23 @@ export function App() {
                     rows={2}
                     placeholder={`Ask about ${project.name}…`}
                   />
+                  {!question.trim() && (project.suggestions ?? []).length > 0 && (
+                    <div className="suggestions" aria-label="Suggested questions">
+                      {(project.suggestions ?? []).map((item) => (
+                        <button
+                          key={item.text}
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            setQuestion(item.text);
+                            setMode(item.mode);
+                          }}
+                        >
+                          {item.text}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   <div className="ask-bar">
                     <div className="seg">
                       {(["auto", "what", "why"] as Mode[]).map((item) => (

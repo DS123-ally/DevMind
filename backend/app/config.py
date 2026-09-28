@@ -19,8 +19,7 @@ def load_dotenv(path: Path) -> None:
             continue
         key, value = line.split("=", 1)
         key, value = key.strip(), value.strip().strip('"').strip("'")
-        if not os.environ.get(key):
-            os.environ[key] = value
+        os.environ[key] = value
 
 
 @dataclass(frozen=True)
